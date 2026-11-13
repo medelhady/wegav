@@ -12,13 +12,6 @@ async function readBody(req) {
   return Buffer.concat(chunks);
 }
 
-// اسم المجلد: أحرف لاتينية وعربية وأرقام فقط، بدون مسافات أو رموز
-function safeFolder(text) {
-  const cleaned = text.replace(/[^\p{L}\p{N}]/gu, '_').replace(/_+/g, '_').slice(0, 40);
-  return cleaned || 'store';
-}
-
-// اسم الملف: أرقام وأحرف لاتينية فقط
 function safeFileName(ext) {
   const rand = Math.random().toString(36).slice(2, 10);
   return `${Date.now()}-${rand}.${ext}`;
@@ -37,11 +30,7 @@ async function handleUpload(req, res) {
   const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
   const SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
   if (!SUPABASE_URL || !SERVICE_KEY) {
-    return res.status(500).json({
-      error: 'Env missing',
-      hasUrl: !!SUPABASE_URL,
-      hasKey: !!SERVICE_KEY,
-    });
+    return res.status(500).json({ error: 'Env missing', hasUrl: !!SUPABASE_URL, hasKey: !!SERVICE_KEY });
   }
 
   let storeName = '';
@@ -103,9 +92,13 @@ async function handleUpload(req, res) {
     storeId = Array.isArray(created) ? created[0]?.id : undefined;
   }
 
-  // 2) رفع الملف إلى التخزين باسم آمن
-  const path = `${safeFolder(storeName)}/${kind}/${safeFileName(ext)}`;
-  const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
+  if (!storeId) {
+    return res.status(500).json({ step: 'store-id', error: 'Could not get store id' });
+  }
+
+  // 2) المسار يعتمد على معرّف المتجر (لاتيني دائماً) وليس على الاسم العربي
+  const path = `${storeId}/${kind}/${safeFileName(ext)}`;
+  const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${encodeURI(path)}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${SERVICE_KEY}`,
