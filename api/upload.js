@@ -12,8 +12,16 @@ async function readBody(req) {
   return Buffer.concat(chunks);
 }
 
-function sanitize(text, max = 50) {
-  return text.replace(/[^\p{L}\p{N}_-]/gu, '_').slice(0, max) || 'store';
+// اسم المجلد: أحرف لاتينية وعربية وأرقام فقط، بدون مسافات أو رموز
+function safeFolder(text) {
+  const cleaned = text.replace(/[^\p{L}\p{N}]/gu, '_').replace(/_+/g, '_').slice(0, 40);
+  return cleaned || 'store';
+}
+
+// اسم الملف: أرقام وأحرف لاتينية فقط
+function safeFileName(ext) {
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `${Date.now()}-${rand}.${ext}`;
 }
 
 async function parseRes(r) {
@@ -29,7 +37,11 @@ async function handleUpload(req, res) {
   const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
   const SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
   if (!SUPABASE_URL || !SERVICE_KEY) {
-    return res.status(500).json({ error: 'Env missing', hasUrl: !!SUPABASE_URL, hasKey: !!SERVICE_KEY });
+    return res.status(500).json({
+      error: 'Env missing',
+      hasUrl: !!SUPABASE_URL,
+      hasKey: !!SERVICE_KEY,
+    });
   }
 
   let storeName = '';
@@ -38,17 +50,28 @@ async function handleUpload(req, res) {
   } catch {
     storeName = '';
   }
-  if (!storeName) return res.status(400).json({ error: 'Missing store name' });
+  if (!storeName) {
+    return res.status(400).json({ error: 'Missing store name' });
+  }
 
   const kind = String(req.headers['x-media-kind'] || '');
-  if (!KINDS.includes(kind)) return res.status(400).json({ error: 'Invalid media kind' });
+  if (!KINDS.includes(kind)) {
+    return res.status(400).json({ error: 'Invalid media kind' });
+  }
 
-  const ext = String(req.headers['x-file-ext'] || 'bin').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'bin';
+  const ext = String(req.headers['x-file-ext'] || 'bin')
+    .replace(/[^a-z0-9]/gi, '')
+    .toLowerCase() || 'bin';
+
   const contentType = req.headers['content-type'] || 'application/octet-stream';
 
   const body = await readBody(req);
-  if (body.length === 0) return res.status(400).json({ error: 'Empty file' });
-  if (body.length > MAX_BYTES) return res.status(413).json({ error: 'File too large (max 4MB)' });
+  if (body.length === 0) {
+    return res.status(400).json({ error: 'Empty file' });
+  }
+  if (body.length > MAX_BYTES) {
+    return res.status(413).json({ error: 'File too large (max 4MB)' });
+  }
 
   const jsonHeaders = {
     Authorization: `Bearer ${SERVICE_KEY}`,
@@ -80,8 +103,8 @@ async function handleUpload(req, res) {
     storeId = Array.isArray(created) ? created[0]?.id : undefined;
   }
 
-  // 2) رفع الملف إلى التخزين
-  const path = `${sanitize(storeName)}/${kind}/${Date.now()}.${ext}`;
+  // 2) رفع الملف إلى التخزين باسم آمن
+  const path = `${safeFolder(storeName)}/${kind}/${safeFileName(ext)}`;
   const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
     method: 'POST',
     headers: {
