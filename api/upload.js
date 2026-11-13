@@ -2,56 +2,87 @@ export const config = {
   api: { bodyParser: false },
 };
 
+const BUCKET = 'media';
+const MAX_BYTES = 4 * 1024 * 1024;
+const KINDS = ['audio', 'image', 'video'];
+
 async function readBody(req) {
   const chunks = [];
   for await (const chunk of req) chunks.push(chunk);
   return Buffer.concat(chunks);
 }
 
-export default async function handler(req, res) {
+function sanitize(text, max = 50) {
+  return text.replace(/[^\p{L}\p{N}_-]/gu, '_').slice(0, max) || 'store';
+}
+
+async function parseRes(r) {
+  const text = await r.text();
+  try { return JSON.parse(text); } catch { return { raw: text.slice(0, 300) }; }
+}
+
+async function handleUpload(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const SUPABASE_URL = process.env.SUPABASE_URL;
-  const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
+  const SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
   if (!SUPABASE_URL || !SERVICE_KEY) {
-    return res.status(500).json({ error: 'Server is not configured' });
+    return res.status(500).json({ error: 'Env missing', hasUrl: !!SUPABASE_URL, hasKey: !!SERVICE_KEY });
   }
 
-  const rawStore = req.headers['x-store-name'] || '';
   let storeName = '';
   try {
-    storeName = decodeURIComponent(rawStore).trim();
+    storeName = decodeURIComponent(req.headers['x-store-name'] || '').trim();
   } catch {
     storeName = '';
   }
-  if (!storeName) {
-    return res.status(400).json({ error: 'Missing store name' });
-  }
+  if (!storeName) return res.status(400).json({ error: 'Missing store name' });
 
-  const folder = storeName.replace(/[^\p{L}\p{N}_-]/gu, '_').slice(0, 50) || 'store';
+  const kind = String(req.headers['x-media-kind'] || '');
+  if (!KINDS.includes(kind)) return res.status(400).json({ error: 'Invalid media kind' });
 
-  const ext = (req.headers['x-file-ext'] || 'bin')
-    .toString()
-    .replace(/[^a-z0-9]/gi, '')
-    .toLowerCase() || 'bin';
-
+  const ext = String(req.headers['x-file-ext'] || 'bin').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'bin';
   const contentType = req.headers['content-type'] || 'application/octet-stream';
 
   const body = await readBody(req);
-  if (body.length === 0) {
-    return res.status(400).json({ error: 'Empty file' });
+  if (body.length === 0) return res.status(400).json({ error: 'Empty file' });
+  if (body.length > MAX_BYTES) return res.status(413).json({ error: 'File too large (max 4MB)' });
+
+  const jsonHeaders = {
+    Authorization: `Bearer ${SERVICE_KEY}`,
+    apikey: SERVICE_KEY,
+    'Content-Type': 'application/json',
+  };
+
+  // 1) البحث عن المتجر أو إنشاؤه
+  const findRes = await fetch(
+    `${SUPABASE_URL}/rest/v1/stores?name=eq.${encodeURIComponent(storeName)}&select=id`,
+    { headers: jsonHeaders }
+  );
+  const found = await parseRes(findRes);
+  if (!findRes.ok) {
+    return res.status(500).json({ step: 'find-store', status: findRes.status, details: found });
   }
-  if (body.length > 4 * 1024 * 1024) {
-    return res.status(413).json({ error: 'File too large (max 4MB)' });
+  let storeId = Array.isArray(found) ? found[0]?.id : undefined;
+
+  if (!storeId) {
+    const createRes = await fetch(`${SUPABASE_URL}/rest/v1/stores`, {
+      method: 'POST',
+      headers: { ...jsonHeaders, Prefer: 'return=representation' },
+      body: JSON.stringify({ name: storeName }),
+    });
+    const created = await parseRes(createRes);
+    if (!createRes.ok) {
+      return res.status(500).json({ step: 'create-store', status: createRes.status, details: created });
+    }
+    storeId = Array.isArray(created) ? created[0]?.id : undefined;
   }
 
-  const fileName = `${Date.now()}.${ext}`;
-  const path = `${encodeURIComponent(folder)}/${fileName}`;
-  const url = `${SUPABASE_URL}/storage/v1/object/voices/${path}`;
-
-  const uploadRes = await fetch(url, {
+  // 2) رفع الملف إلى التخزين
+  const path = `${sanitize(storeName)}/${kind}/${Date.now()}.${ext}`;
+  const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${path}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${SERVICE_KEY}`,
@@ -61,11 +92,39 @@ export default async function handler(req, res) {
     },
     body,
   });
-
-  const data = await uploadRes.json().catch(() => ({}));
   if (!uploadRes.ok) {
-    return res.status(500).json({ error: 'Upload failed', details: data });
+    const details = await parseRes(uploadRes);
+    return res.status(500).json({ step: 'upload', status: uploadRes.status, details });
   }
 
-  return res.status(200).json({ ok: true, store: storeName, path: `${folder}/${fileName}` });
+  // 3) تسجيل الملف في جدول media_files
+  const saveRes = await fetch(`${SUPABASE_URL}/rest/v1/media_files`, {
+    method: 'POST',
+    headers: { ...jsonHeaders, Prefer: 'return=representation' },
+    body: JSON.stringify({
+      store_id: storeId,
+      kind,
+      storage_path: path,
+      mime_type: contentType,
+      size_bytes: body.length,
+    }),
+  });
+  if (!saveRes.ok) {
+    const details = await parseRes(saveRes);
+    return res.status(500).json({ step: 'save-record', status: saveRes.status, details });
+  }
+
+  return res.status(200).json({ ok: true, store: storeName, kind, path });
+}
+
+export default async function handler(req, res) {
+  try {
+    return await handleUpload(req, res);
+  } catch (err) {
+    return res.status(500).json({
+      step: 'exception',
+      message: String(err?.message || err),
+      cause: String(err?.cause?.message || err?.cause || ''),
+    });
+  }
 }
