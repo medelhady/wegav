@@ -10,10 +10,13 @@ body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;padding:24px;c
 h1{font-size:20px;margin-top:0}
 label{display:block;margin:14px 0 6px;font-weight:600}
 input[type=text]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box}
-input[type=file]{width:100%}
-button{margin-top:18px;width:100%;padding:12px;background:#1a73e8;color:#fff;border:0;border-radius:8px;font-size:16px;cursor:pointer}
-button:disabled{background:#9bbcf0;cursor:wait}
-#msg{margin-top:14px;font-size:14px;line-height:1.7}
+.uploads{display:grid;gap:12px;margin-top:18px}
+.up{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px;border:1px solid #e3e6ee;border-radius:10px}
+.up span{font-weight:600}
+.up input[type=file]{display:none}
+.up label.btn{margin:0;padding:10px 16px;background:#1a73e8;color:#fff;border-radius:8px;cursor:pointer;font-weight:600;white-space:nowrap}
+.up .fname{font-size:12px;color:#666;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#msg{margin-top:16px;font-size:14px;line-height:1.7;min-height:24px}
 .ok{color:#188038}.err{color:#d93025}
 .hint{font-size:13px;color:#666;margin-top:6px}
 </style>
@@ -24,76 +27,90 @@ button:disabled{background:#9bbcf0;cursor:wait}
 
   <label for="name">اسم المتجر</label>
   <input type="text" id="name" placeholder="مثال: متجر النور">
+  <div class="hint">اكتب اسم المتجر أولاً، ثم اختر نوع الملف الذي تريد رفعه</div>
 
-  <label for="file">اختر الملف (صوت أو صورة أو فيديو)</label>
-  <input type="file" id="file" accept="audio/*,image/*,video/*">
-  <div class="hint">الحد الأقصى 4 ميغابايت لكل ملف</div>
+  <div class="uploads">
+    <div class="up">
+      <span>🎤 صوت</span>
+      <span class="fname" id="fname-audio">لم يُختر ملف</span>
+      <label class="btn" for="file-audio">اختر صوت</label>
+      <input type="file" id="file-audio" accept="audio/*" data-kind="audio">
+    </div>
+    <div class="up">
+      <span>🖼️ صورة</span>
+      <span class="fname" id="fname-image">لم يُختر ملف</span>
+      <label class="btn" for="file-image">اختر صورة</label>
+      <input type="file" id="file-image" accept="image/*" data-kind="image">
+    </div>
+    <div class="up">
+      <span>🎬 فيديو</span>
+      <span class="fname" id="fname-video">لم يُختر ملف</span>
+      <label class="btn" for="file-video">اختر فيديو</label>
+      <input type="file" id="file-video" accept="video/*" data-kind="video">
+    </div>
+  </div>
 
-  <button id="btn">رفع الملف</button>
   <div id="msg"></div>
 </div>
 
 <script>
 const LIMIT = 4 * 1024 * 1024;
-const EXT_KIND = {
-  ogg:'audio', mp3:'audio', m4a:'audio', wav:'audio', opus:'audio', aac:'audio', amr:'audio',
-  jpg:'image', jpeg:'image', png:'image', webp:'image', gif:'image',
-  mp4:'video', mov:'video', webm:'video', '3gp':'video'
-};
+const msg = document.getElementById('msg');
 
-function detectKind(file) {
-  const byMime = (file.type || '').split('/')[0];
-  if (['audio','image','video'].includes(byMime)) return byMime;
-  const ext = (file.name.split('.').pop() || '').toLowerCase();
-  return EXT_KIND[ext] || null;
+function show(text, cls) {
+  msg.className = cls || '';
+  msg.textContent = text;
 }
 
-const msg = document.getElementById('msg');
-const btn = document.getElementById('btn');
-
-btn.addEventListener('click', async () => {
-  const name = document.getElementById('name').value.trim();
-  const file = document.getElementById('file').files[0];
-  msg.className = '';
-
-  if (!name) { msg.className = 'err'; msg.textContent = 'اكتب اسم المتجر أولاً'; return; }
-  if (!file) { msg.className = 'err'; msg.textContent = 'اختر ملفاً أولاً'; return; }
-
-  const kind = detectKind(file);
-  if (!kind) { msg.className = 'err'; msg.textContent = 'نوع الملف غير مدعوم'; return; }
-  if (file.size > LIMIT) { msg.className = 'err'; msg.textContent = 'الملف كبير جداً (الحد 4 ميغابايت)'; return; }
-
+async function upload(file, kind, storeName) {
   const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
-  const mime = file.type || 'application/octet-stream';
+  const res = await fetch('/api/upload', {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-Store-Name': encodeURIComponent(storeName),
+      'X-Media-Kind': kind,
+      'X-File-Ext': ext
+    },
+    body: file
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
 
-  btn.disabled = true;
-  msg.textContent = 'جاري الرفع...';
+['audio', 'image', 'video'].forEach(kind => {
+  const input = document.getElementById('file-' + kind);
+  const fname = document.getElementById('fname-' + kind);
 
-  try {
-    const res = await fetch('/api/upload', {
-      method: 'POST',
-      headers: {
-        'Content-Type': mime,
-        'X-Store-Name': encodeURIComponent(name),
-        'X-Media-Kind': kind,
-        'X-File-Ext': ext
-      },
-      body: file
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      msg.className = 'err';
-      msg.textContent = 'فشل الرفع: ' + (data.error || res.status);
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    if (!file) return;
+
+    const storeName = document.getElementById('name').value.trim();
+    if (!storeName) {
+      show('اكتب اسم المتجر أولاً', 'err');
+      input.value = '';
       return;
     }
-    msg.className = 'ok';
-    msg.textContent = 'تم الرفع بنجاح ✓ (' + kind + ') المسار: ' + data.path;
-  } catch (e) {
-    msg.className = 'err';
-    msg.textContent = 'تعذر الاتصال بالسيرفر';
-  } finally {
-    btn.disabled = false;
-  }
+    if (file.size > LIMIT) {
+      show('الملف كبير جداً (الحد 4 ميغابايت)', 'err');
+      input.value = '';
+      return;
+    }
+
+    fname.textContent = file.name;
+    show('جاري رفع ' + file.name + '...');
+
+    try {
+      const data = await upload(file, kind, storeName);
+      show('تم الرفع بنجاح ✓ (' + kind + ') المسار: ' + data.path, 'ok');
+    } catch (e) {
+      show('فشل الرفع: ' + e.message, 'err');
+    } finally {
+      input.value = '';
+    }
+  });
 });
 </script>
 </body>
