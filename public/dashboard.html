@@ -9,16 +9,26 @@ body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;padding:24px;c
 .card{background:#fff;max-width:560px;margin:auto;padding:24px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
 h1{font-size:20px;margin-top:0}
 label.lbl{display:block;margin:14px 0 6px;font-weight:600}
-input[type=text]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box}
+input[type=text],textarea{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:inherit}
+textarea{min-height:90px;resize:vertical}
 .hint{font-size:13px;color:#666;margin-top:6px}
-.uploads{display:grid;gap:12px;margin-top:18px}
-.up{padding:12px;border:1px solid #e3e6ee;border-radius:10px}
-.up-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
-.up-head span.t{font-weight:700}
-.up input[type=file]{display:none}
-.up label.btn{margin:0;padding:10px 16px;background:#1a73e8;color:#fff;border-radius:8px;cursor:pointer;font-weight:600;white-space:nowrap}
-.count{font-size:13px;color:#188038;margin-top:8px}
-#log{margin-top:18px;font-size:14px;line-height:1.8;max-height:300px;overflow:auto;border-top:1px solid #eee;padding-top:12px;word-break:break-word}
+.section{margin-top:14px;padding:12px;border:1px solid #e3e6ee;border-radius:10px}
+.sec-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.sec-head .t{font-weight:700}
+.sec-head input[type=file]{display:none}
+.btn{margin:0;padding:10px 16px;background:#1a73e8;color:#fff;border:0;border-radius:8px;cursor:pointer;font-weight:600;white-space:nowrap;font-size:14px}
+.btn:disabled{opacity:.5;cursor:wait}
+.count{font-size:13px;color:#555;margin-top:8px}
+.list{margin-top:8px}
+.item{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px dashed #eee;font-size:13px}
+.num{color:#1a73e8;font-weight:700;min-width:26px}
+.fn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;text-align:left}
+.txt{flex:1;white-space:pre-wrap;word-break:break-word}
+.del{background:#fff;color:#d93025;border:1px solid #f1b3ad;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px}
+.del:disabled{opacity:.5;cursor:wait}
+.empty{font-size:13px;color:#999;padding:6px 0}
+.txt-actions{display:flex;justify-content:flex-end;margin-top:8px}
+#log{margin-top:18px;font-size:14px;line-height:1.8;max-height:260px;overflow:auto;border-top:1px solid #eee;padding-top:12px;word-break:break-word}
 .ok{color:#188038}.err{color:#d93025}.busy{color:#555}
 </style>
 </head>
@@ -28,35 +38,48 @@ input[type=text]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px
 
   <label class="lbl" for="name">اسم المتجر</label>
   <input type="text" id="name" placeholder="مثال: متجر النور">
-  <div class="hint">اكتب اسم المتجر أولاً، ثم اختر الملفات. يمكنك اختيار أكثر من ملف في كل نوع.</div>
+  <div class="hint">اكتب اسم المتجر أولاً، ثم أضف الملفات أو النصوص.</div>
 
-  <div class="uploads">
-    <div class="up">
-      <div class="up-head">
-        <span class="t">🎤 صوت</span>
-        <label class="btn" for="file-audio">اختر أصواتاً</label>
-        <input type="file" id="file-audio" accept="audio/*" multiple>
-      </div>
-      <div class="count" id="count-audio">تم رفع 0 ملف</div>
+  <div class="section">
+    <div class="sec-head">
+      <span class="t">📝 النصوص</span>
     </div>
+    <textarea id="text-input" maxlength="1000" placeholder="اكتب النص هنا (حتى 1000 حرف)"></textarea>
+    <div class="txt-actions">
+      <button class="btn" id="btn-text">إضافة النص</button>
+    </div>
+    <div class="count" id="count-text">العدد: 0</div>
+    <div class="list" id="list-text"></div>
+  </div>
 
-    <div class="up">
-      <div class="up-head">
-        <span class="t">🖼️ صورة</span>
-        <label class="btn" for="file-image">اختر صوراً</label>
-        <input type="file" id="file-image" accept="image/*" multiple>
-      </div>
-      <div class="count" id="count-image">تم رفع 0 ملف</div>
+  <div class="section" data-kind="audio">
+    <div class="sec-head">
+      <span class="t">🎤 الأصوات</span>
+      <label class="btn" for="file-audio">اختر أصواتاً</label>
+      <input type="file" id="file-audio" accept="audio/*" multiple>
     </div>
+    <div class="count" id="count-audio">العدد: 0</div>
+    <div class="list" id="list-audio"></div>
+  </div>
 
-    <div class="up">
-      <div class="up-head">
-        <span class="t">🎬 فيديو</span>
-        <label class="btn" for="file-video">اختر فيديوهات</label>
-        <input type="file" id="file-video" accept="video/*" multiple>
-      </div>
-      <div class="count" id="count-video">تم رفع 0 ملف</div>
+  <div class="section" data-kind="image">
+    <div class="sec-head">
+      <span class="t">🖼️ الصور</span>
+      <label class="btn" for="file-image">اختر صوراً</label>
+      <input type="file" id="file-image" accept="image/*" multiple>
     </div>
+    <div class="count" id="count-image">العدد: 0</div>
+    <div class="list" id="list-image"></div>
+  </div>
+
+  <div class="section" data-kind="video">
+    <div class="sec-head">
+      <span class="t">🎬 الفيديوهات</span>
+      <label class="btn" for="file-video">اختر فيديوهات</label>
+      <input type="file" id="file-video" accept="video/*" multiple>
+    </div>
+    <div class="count" id="count-video">العدد: 0</div>
+    <div class="list" id="list-video"></div>
   </div>
 
   <div id="log"></div>
@@ -64,8 +87,11 @@ input[type=text]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px
 
 <script>
 const LIMIT = 4 * 1024 * 1024;
+const KINDS = ['audio', 'image', 'video'];
+const items = { audio: [], image: [], video: [] };
+let texts = [];
 const log = document.getElementById('log');
-const counts = { audio: 0, image: 0, video: 0 };
+const nameInput = document.getElementById('name');
 
 function addLine(text, cls) {
   const d = document.createElement('div');
@@ -73,6 +99,44 @@ function addLine(text, cls) {
   d.textContent = text;
   log.prepend(d);
   return d;
+}
+
+function emptyRow(box, msg) {
+  const e = document.createElement('div');
+  e.className = 'empty';
+  e.textContent = msg;
+  box.appendChild(e);
+}
+
+/* ---------- الملفات ---------- */
+
+function render(kind) {
+  const box = document.getElementById('list-' + kind);
+  document.getElementById('count-' + kind).textContent = 'العدد: ' + items[kind].length;
+  box.innerHTML = '';
+  if (items[kind].length === 0) return emptyRow(box, 'لا توجد ملفات بعد');
+
+  items[kind].forEach((it, i) => {
+    const row = document.createElement('div');
+    row.className = 'item';
+
+    const num = document.createElement('span');
+    num.className = 'num';
+    num.textContent = (i + 1) + '.';
+
+    const name = document.createElement('span');
+    name.className = 'fn';
+    name.textContent = it.name;
+    name.title = it.name;
+
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.textContent = 'حذف';
+    del.addEventListener('click', () => removeFile(kind, i, del));
+
+    row.append(num, name, del);
+    box.appendChild(row);
+  });
 }
 
 async function upload(file, kind, storeName) {
@@ -93,9 +157,7 @@ async function upload(file, kind, storeName) {
     throw new Error('تعذر الاتصال بالسيرفر: ' + e.message);
   }
 
-  if (res.status === 404) {
-    throw new Error('الدالة /api/upload غير موجودة');
-  }
+  if (res.status === 404) throw new Error('الدالة /api/upload غير موجودة');
 
   const text = await res.text();
   let data = {};
@@ -103,10 +165,7 @@ async function upload(file, kind, storeName) {
 
   if (!res.ok) {
     const detail = [
-      data.error,
-      data.step,
-      data.status,
-      data.message,
+      data.error, data.step, data.status, data.message,
       data.details ? JSON.stringify(data.details).slice(0, 300) : '',
       data.raw
     ].filter(Boolean).join(' | ') || ('HTTP ' + res.status);
@@ -115,16 +174,39 @@ async function upload(file, kind, storeName) {
   return data;
 }
 
-['audio', 'image', 'video'].forEach(kind => {
+async function removeFile(kind, index, btn) {
+  const it = items[kind][index];
+  if (!confirm('حذف "' + it.name + '" نهائياً؟')) return;
+
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: it.path })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+
+    items[kind].splice(index, 1);
+    render(kind);
+    addLine('🗑 تم حذف ' + it.name, 'ok');
+  } catch (e) {
+    btn.disabled = false;
+    addLine('✗ فشل الحذف: ' + e.message, 'err');
+  }
+}
+
+KINDS.forEach(kind => {
+  render(kind);
   const input = document.getElementById('file-' + kind);
-  const countEl = document.getElementById('count-' + kind);
 
   input.addEventListener('change', async () => {
     const files = Array.from(input.files);
     input.value = '';
     if (files.length === 0) return;
 
-    const storeName = document.getElementById('name').value.trim();
+    const storeName = nameInput.value.trim();
     if (!storeName) {
       addLine('✗ اكتب اسم المتجر أولاً ثم أعد اختيار الملفات', 'err');
       return;
@@ -139,10 +221,10 @@ async function upload(file, kind, storeName) {
       const line = addLine('… جاري رفع ' + file.name, 'busy');
       try {
         const data = await upload(file, kind, storeName);
-        counts[kind]++;
-        countEl.textContent = 'تم رفع ' + counts[kind] + ' ملف';
+        items[kind].push({ name: file.name, path: data.path });
+        render(kind);
         line.className = 'ok';
-        line.textContent = '✓ ' + file.name + ' → ' + data.path;
+        line.textContent = '✓ ' + file.name;
       } catch (e) {
         line.className = 'err';
         line.textContent = '✗ ' + file.name + ': ' + e.message;
@@ -150,6 +232,104 @@ async function upload(file, kind, storeName) {
     }
   });
 });
+
+/* ---------- النصوص ---------- */
+
+function renderTexts() {
+  const box = document.getElementById('list-text');
+  document.getElementById('count-text').textContent = 'العدد: ' + texts.length;
+  box.innerHTML = '';
+  if (texts.length === 0) return emptyRow(box, 'لا توجد نصوص بعد');
+
+  texts.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'item';
+
+    const num = document.createElement('span');
+    num.className = 'num';
+    num.textContent = (i + 1) + '.';
+
+    const body = document.createElement('span');
+    body.className = 'txt';
+    body.textContent = t.content;
+
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.textContent = 'حذف';
+    del.addEventListener('click', () => removeText(t.id, del));
+
+    row.append(num, body, del);
+    box.appendChild(row);
+  });
+}
+
+async function loadTexts() {
+  const name = nameInput.value.trim();
+  if (!name) { texts = []; renderTexts(); return; }
+  try {
+    const res = await fetch('/api/text?store=' + encodeURIComponent(name));
+    const data = await res.json().catch(() => ({}));
+    texts = Array.isArray(data.items) ? data.items : [];
+  } catch (e) {
+    texts = [];
+  }
+  renderTexts();
+}
+
+async function addText() {
+  const btn = document.getElementById('btn-text');
+  const box = document.getElementById('text-input');
+  const storeName = nameInput.value.trim();
+  const content = box.value.trim();
+
+  if (!storeName) return addLine('✗ اكتب اسم المتجر أولاً', 'err');
+  if (!content) return addLine('✗ اكتب نصاً قبل الإضافة', 'err');
+
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ store: storeName, content })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+
+    texts.push(data.item);
+    renderTexts();
+    box.value = '';
+    addLine('✓ تمت إضافة النص', 'ok');
+  } catch (e) {
+    addLine('✗ فشل إضافة النص: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function removeText(id, btn) {
+  if (!confirm('حذف هذا النص نهائياً؟')) return;
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/text', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+
+    texts = texts.filter(t => t.id !== id);
+    renderTexts();
+    addLine('🗑 تم حذف النص', 'ok');
+  } catch (e) {
+    btn.disabled = false;
+    addLine('✗ فشل الحذف: ' + e.message, 'err');
+  }
+}
+
+document.getElementById('btn-text').addEventListener('click', addText);
+nameInput.addEventListener('change', loadTexts);
+renderTexts();
 </script>
 </body>
 </html>
