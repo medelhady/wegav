@@ -30,7 +30,7 @@ async function handleUpload(req, res) {
   const SUPABASE_URL = (process.env.SUPABASE_URL || '').trim();
   const SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
   if (!SUPABASE_URL || !SERVICE_KEY) {
-    return res.status(500).json({ error: 'Env missing', hasUrl: !!SUPABASE_URL, hasKey: !!SERVICE_KEY });
+    return res.status(500).json({ error: 'Env missing' });
   }
 
   let storeName = '';
@@ -39,14 +39,18 @@ async function handleUpload(req, res) {
   } catch {
     storeName = '';
   }
-  if (!storeName) {
-    return res.status(400).json({ error: 'Missing store name' });
-  }
+  if (!storeName) return res.status(400).json({ error: 'Missing store name' });
 
   const kind = String(req.headers['x-media-kind'] || '');
-  if (!KINDS.includes(kind)) {
-    return res.status(400).json({ error: 'Invalid media kind' });
+  if (!KINDS.includes(kind)) return res.status(400).json({ error: 'Invalid media kind' });
+
+  let originalName = '';
+  try {
+    originalName = decodeURIComponent(req.headers['x-original-name'] || '').trim();
+  } catch {
+    originalName = '';
   }
+  if (!originalName) originalName = 'file';
 
   const ext = String(req.headers['x-file-ext'] || 'bin')
     .replace(/[^a-z0-9]/gi, '')
@@ -55,12 +59,8 @@ async function handleUpload(req, res) {
   const contentType = req.headers['content-type'] || 'application/octet-stream';
 
   const body = await readBody(req);
-  if (body.length === 0) {
-    return res.status(400).json({ error: 'Empty file' });
-  }
-  if (body.length > MAX_BYTES) {
-    return res.status(413).json({ error: 'File too large (max 4MB)' });
-  }
+  if (body.length === 0) return res.status(400).json({ error: 'Empty file' });
+  if (body.length > MAX_BYTES) return res.status(413).json({ error: 'File too large (max 4MB)' });
 
   const jsonHeaders = {
     Authorization: `Bearer ${SERVICE_KEY}`,
@@ -92,11 +92,9 @@ async function handleUpload(req, res) {
     storeId = Array.isArray(created) ? created[0]?.id : undefined;
   }
 
-  if (!storeId) {
-    return res.status(500).json({ step: 'store-id', error: 'Could not get store id' });
-  }
+  if (!storeId) return res.status(500).json({ step: 'store-id', error: 'Could not get store id' });
 
-  // 2) المسار يعتمد على معرّف المتجر (لاتيني دائماً) وليس على الاسم العربي
+  // 2) رفع الملف (المسار يعتمد على معرّف المتجر)
   const path = `${storeId}/${kind}/${safeFileName(ext)}`;
   const uploadRes = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET}/${encodeURI(path)}`, {
     method: 'POST',
@@ -113,7 +111,7 @@ async function handleUpload(req, res) {
     return res.status(500).json({ step: 'upload', status: uploadRes.status, details });
   }
 
-  // 3) تسجيل الملف في جدول media_files
+  // 3) تسجيل الملف مع اسمه الأصلي
   const saveRes = await fetch(`${SUPABASE_URL}/rest/v1/media_files`, {
     method: 'POST',
     headers: { ...jsonHeaders, Prefer: 'return=representation' },
@@ -121,6 +119,7 @@ async function handleUpload(req, res) {
       store_id: storeId,
       kind,
       storage_path: path,
+      original_name: originalName,
       mime_type: contentType,
       size_bytes: body.length,
     }),
@@ -140,7 +139,6 @@ export default async function handler(req, res) {
     return res.status(500).json({
       step: 'exception',
       message: String(err?.message || err),
-      cause: String(err?.cause?.message || err?.cause || ''),
     });
   }
 }
