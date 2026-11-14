@@ -38,21 +38,17 @@ textarea{min-height:90px;resize:vertical}
 
   <label class="lbl" for="name">اسم المتجر</label>
   <input type="text" id="name" placeholder="مثال: متجر النور">
-  <div class="hint">اكتب اسم المتجر أولاً، ثم أضف الملفات أو النصوص.</div>
+  <div class="hint">اكتب اسم المتجر أولاً، ثم أضف الملفات أو النصوص. تُحفظ كلها ويمكن حذفها.</div>
 
   <div class="section">
-    <div class="sec-head">
-      <span class="t">📝 النصوص</span>
-    </div>
+    <div class="sec-head"><span class="t">📝 النصوص</span></div>
     <textarea id="text-input" maxlength="1000" placeholder="اكتب النص هنا (حتى 1000 حرف)"></textarea>
-    <div class="txt-actions">
-      <button class="btn" id="btn-text">إضافة النص</button>
-    </div>
+    <div class="txt-actions"><button class="btn" id="btn-text">إضافة النص</button></div>
     <div class="count" id="count-text">العدد: 0</div>
     <div class="list" id="list-text"></div>
   </div>
 
-  <div class="section" data-kind="audio">
+  <div class="section">
     <div class="sec-head">
       <span class="t">🎤 الأصوات</span>
       <label class="btn" for="file-audio">اختر أصواتاً</label>
@@ -62,7 +58,7 @@ textarea{min-height:90px;resize:vertical}
     <div class="list" id="list-audio"></div>
   </div>
 
-  <div class="section" data-kind="image">
+  <div class="section">
     <div class="sec-head">
       <span class="t">🖼️ الصور</span>
       <label class="btn" for="file-image">اختر صوراً</label>
@@ -72,7 +68,7 @@ textarea{min-height:90px;resize:vertical}
     <div class="list" id="list-image"></div>
   </div>
 
-  <div class="section" data-kind="video">
+  <div class="section">
     <div class="sec-head">
       <span class="t">🎬 الفيديوهات</span>
       <label class="btn" for="file-video">اختر فيديوهات</label>
@@ -88,8 +84,8 @@ textarea{min-height:90px;resize:vertical}
 <script>
 const LIMIT = 4 * 1024 * 1024;
 const KINDS = ['audio', 'image', 'video'];
-const items = { audio: [], image: [], video: [] };
 let texts = [];
+let media = [];
 const log = document.getElementById('log');
 const nameInput = document.getElementById('name');
 
@@ -110,13 +106,14 @@ function emptyRow(box, msg) {
 
 /* ---------- الملفات ---------- */
 
-function render(kind) {
+function renderMedia(kind) {
+  const list = media.filter(m => m.kind === kind);
   const box = document.getElementById('list-' + kind);
-  document.getElementById('count-' + kind).textContent = 'العدد: ' + items[kind].length;
+  document.getElementById('count-' + kind).textContent = 'العدد: ' + list.length;
   box.innerHTML = '';
-  if (items[kind].length === 0) return emptyRow(box, 'لا توجد ملفات بعد');
+  if (list.length === 0) return emptyRow(box, 'لا توجد ملفات بعد');
 
-  items[kind].forEach((it, i) => {
+  list.forEach((it, i) => {
     const row = document.createElement('div');
     row.className = 'item';
 
@@ -126,17 +123,34 @@ function render(kind) {
 
     const name = document.createElement('span');
     name.className = 'fn';
-    name.textContent = it.name;
-    name.title = it.name;
+    name.textContent = it.original_name || it.storage_path;
+    name.title = name.textContent;
 
     const del = document.createElement('button');
     del.className = 'del';
     del.textContent = 'حذف';
-    del.addEventListener('click', () => removeFile(kind, i, del));
+    del.addEventListener('click', () => removeMedia(it, del));
 
     row.append(num, name, del);
     box.appendChild(row);
   });
+}
+
+function renderAllMedia() {
+  KINDS.forEach(renderMedia);
+}
+
+async function loadMedia() {
+  const name = nameInput.value.trim();
+  if (!name) { media = []; renderAllMedia(); return; }
+  try {
+    const res = await fetch('/api/media?store=' + encodeURIComponent(name));
+    const data = await res.json().catch(() => ({}));
+    media = Array.isArray(data.items) ? data.items : [];
+  } catch (e) {
+    media = [];
+  }
+  renderAllMedia();
 }
 
 async function upload(file, kind, storeName) {
@@ -149,7 +163,8 @@ async function upload(file, kind, storeName) {
         'Content-Type': file.type || 'application/octet-stream',
         'X-Store-Name': encodeURIComponent(storeName),
         'X-Media-Kind': kind,
-        'X-File-Ext': ext
+        'X-File-Ext': ext,
+        'X-Original-Name': encodeURIComponent(file.name)
       },
       body: file
     });
@@ -174,23 +189,21 @@ async function upload(file, kind, storeName) {
   return data;
 }
 
-async function removeFile(kind, index, btn) {
-  const it = items[kind][index];
-  if (!confirm('حذف "' + it.name + '" نهائياً؟')) return;
-
+async function removeMedia(it, btn) {
+  if (!confirm('حذف "' + (it.original_name || 'الملف') + '" نهائياً؟')) return;
   btn.disabled = true;
   try {
-    const res = await fetch('/api/delete', {
-      method: 'POST',
+    const res = await fetch('/api/media', {
+      method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ path: it.path })
+      body: JSON.stringify({ id: it.id, path: it.storage_path })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
 
-    items[kind].splice(index, 1);
-    render(kind);
-    addLine('🗑 تم حذف ' + it.name, 'ok');
+    media = media.filter(m => m.id !== it.id);
+    renderAllMedia();
+    addLine('🗑 تم حذف ' + (it.original_name || 'الملف'), 'ok');
   } catch (e) {
     btn.disabled = false;
     addLine('✗ فشل الحذف: ' + e.message, 'err');
@@ -198,7 +211,6 @@ async function removeFile(kind, index, btn) {
 }
 
 KINDS.forEach(kind => {
-  render(kind);
   const input = document.getElementById('file-' + kind);
 
   input.addEventListener('change', async () => {
@@ -221,8 +233,13 @@ KINDS.forEach(kind => {
       const line = addLine('… جاري رفع ' + file.name, 'busy');
       try {
         const data = await upload(file, kind, storeName);
-        items[kind].push({ name: file.name, path: data.path });
-        render(kind);
+        media.push({
+          id: data.id || ('tmp-' + Date.now() + Math.random()),
+          kind,
+          storage_path: data.path,
+          original_name: file.name
+        });
+        renderMedia(kind);
         line.className = 'ok';
         line.textContent = '✓ ' + file.name;
       } catch (e) {
@@ -328,8 +345,14 @@ async function removeText(id, btn) {
 }
 
 document.getElementById('btn-text').addEventListener('click', addText);
-nameInput.addEventListener('change', loadTexts);
+
+nameInput.addEventListener('change', () => {
+  loadTexts();
+  loadMedia();
+});
+
 renderTexts();
+renderAllMedia();
 </script>
 </body>
 </html>
