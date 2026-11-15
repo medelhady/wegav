@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>داشبورد التاجر</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;color:#222}
+.wrap{max-width:620px;margin:0 auto;padding:16px}
+.top{background:#fff;border-radius:12px;padding:16px;display:flex;justify-content:space-between;align-items:center;gap:10px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.top h1{font-size:18px;margin:0}
+.top .sub{font-size:13px;color:#666}
+.logout{background:#fff;border:1px solid #ddd;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13px}
+.tabs{display:flex;gap:6px;margin:14px 0;overflow-x:auto}
+.tab{flex:1;min-width:max-content;background:#fff;border:1px solid #dde1ea;border-radius:10px;padding:10px 8px;cursor:pointer;font-size:14px;font-weight:600;color:#444}
+.tab.active{background:#1a73e8;color:#fff;border-color:#1a73e8}
+.panel{display:none;background:#fff;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.panel.active{display:block}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.box{border:1px solid #e3e6ee;border-radius:10px;padding:12px}
+.box .k{font-size:12px;color:#777}
+.box .v{font-size:20px;font-weight:700;margin-top:4px}
+.big-code{font-size:34px;letter-spacing:6px;color:#1a73e8;font-weight:700;text-align:center}
+.bar{height:10px;background:#eef1f6;border-radius:6px;overflow:hidden;margin-top:8px}
+.bar div{height:100%;background:#1a73e8}
+.badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:700}
+.b-active{background:#e6f4ea;color:#188038}
+.b-paused{background:#fef7e0;color:#b06000}
+.b-suspended{background:#fce8e6;color:#d93025}
+.sec{margin-top:16px;padding-top:4px}
+.sec h3{font-size:15px;margin:10px 0 6px}
+textarea{width:100%;min-height:80px;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:inherit}
+.btn{background:#1a73e8;color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600;font-size:14px}
+.btn:disabled{opacity:.5;cursor:wait}
+.btn.file{display:inline-block}
+input[type=file]{display:none}
+.item{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed #eee;font-size:14px}
+.num{color:#1a73e8;font-weight:700;min-width:26px}
+.txt{flex:1;white-space:pre-wrap;word-break:break-word}
+.fn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;text-align:left}
+.del{background:#fff;color:#d93025;border:1px solid #f1b3ad;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px}
+.empty{font-size:13px;color:#999;padding:8px 0}
+.note{font-size:13px;color:#666;background:#f7f9fc;border-radius:8px;padding:12px;line-height:1.8}
+#log{margin-top:14px;font-size:13px;line-height:1.7}
+.ok{color:#188038}.err{color:#d93025}.busy{color:#555}
+@media (max-width:480px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div>
+      <h1 id="store-name">...</h1>
+      <div class="sub">كودك: <b id="store-code">---</b></div>
+    </div>
+    <button class="logout" id="logout">خروج</button>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="t1">الكود والحصة</button>
+    <button class="tab" data-tab="t2">القائمة المرقمة</button>
+    <button class="tab" data-tab="t3">النصوص والملفات</button>
+    <button class="tab" data-tab="t4">سجل الزبائن</button>
+  </div>
+
+  <!-- التبويب 1: الكود والحالة والحصة -->
+  <div class="panel active" id="t1">
+    <div class="big-code" id="big-code">---</div>
+    <div class="grid" style="margin-top:16px">
+      <div class="box">
+        <div class="k">الحالة</div>
+        <div class="v"><span class="badge" id="status-badge">---</span></div>
+      </div>
+      <div class="box">
+        <div class="k">نوع الخطة</div>
+        <div class="v" id="plan-type">---</div>
+      </div>
+      <div class="box" style="grid-column:1/-1">
+        <div class="k">الردود المستخدمة</div>
+        <div class="v"><span id="used">0</span> من <span id="quota">0</span></div>
+        <div class="bar"><div id="bar-fill" style="width:0%"></div></div>
+      </div>
+      <div class="box" style="grid-column:1/-1">
+        <div class="k">تاريخ الانتهاء</div>
+        <div class="v" id="expires" style="font-size:16px">---</div>
+      </div>
+    </div>
+    <div class="note" style="margin-top:16px">
+      أرسل هذا الكود لزبائنك، ليكتبوه للبوت ويحصلوا على ردودك.
+    </div>
+  </div>
+
+  <!-- التبويب 2: القائمة المرقمة (قيد الإنشاء) -->
+  <div class="panel" id="t2">
+    <div class="note">
+      هنا ستُبنى قائمتك المرقمة، فكل رقم يرسل رداً مختلفاً (نص أو صوت أو صورة أو فيديو).
+      سيتم تفعيلها في الخطوة القادمة بعد ربط الردود بالبوت.
+    </div>
+  </div>
+
+  <!-- التبويب 3: النصوص والملفات -->
+  <div class="panel" id="t3">
+    <div class="sec">
+      <h3>📝 النصوص</h3>
+      <textarea id="text-input" maxlength="1000" placeholder="اكتب النص هنا (حتى 1000 حرف)"></textarea>
+      <div style="text-align:left;margin-top:8px">
+        <button class="btn" id="btn-text">إضافة النص</button>
+      </div>
+      <div id="list-text"></div>
+    </div>
+
+    <div class="sec">
+      <h3>🎤 الأصوات</h3>
+      <label class="btn file" for="file-audio">اختر أصواتاً</label>
+      <input type="file" id="file-audio" accept="audio/*" multiple>
+      <div id="list-audio"></div>
+    </div>
+
+    <div class="sec">
+      <h3>🖼️ الصور</h3>
+      <label class="btn file" for="file-image">اختر صوراً</label>
+      <input type="file" id="file-image" accept="image/*" multiple>
+      <div id="list-image"></div>
+    </div>
+
+    <div class="sec">
+      <h3>🎬 الفيديوهات</h3>
+      <label class="btn file" for="file-video">اختر فيديوهات</label>
+      <input type="file" id="file-video" accept="video/*" multiple>
+      <div id="list-video"></div>
+    </div>
+
+    <div id="log"></div>
+  </div>
+
+  <!-- التبويب 4: سجل الزبائن (قيد الإنشاء) -->
+  <div class="panel" id="t4">
+    <div class="note">
+      هنا ستظهر أرقام الزبائن الذين راسلوا البوت، وعدد مرات الرد عليهم.
+      سيتم تفعيلها بعد تجهيز تسجيل الرسائل.
+    </div>
+  </div>
+
+</div>
+
+<script>
+const phone = localStorage.getItem('merchant_phone');
+if (!phone) location.href = '/login.html';
+
+let merchant = null;
+let texts = [];
+let media = [];
+const KINDS = ['audio', 'image', 'video'];
+const LIMIT = 4 * 1024 * 1024;
+
+const $ = id => document.getElementById(id);
+const log = $('log');
+
+function addLine(text, cls) {
+  const d = document.createElement('div');
+  d.className = cls || '';
+  d.textContent = text;
+  log.prepend(d);
+  return d;
+}
+
+/* ---------- التبويبات ---------- */
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    $(btn.dataset.tab).classList.add('active');
+  });
+});
+
+$('logout').addEventListener('click', () => {
+  localStorage.removeItem('merchant_phone');
+  location.href = '/login.html';
+});
+
+/* ---------- التبويب 1 ---------- */
+function renderInfo() {
+  const m = merchant;
+  $('store-name').textContent = m.name;
+  $('store-code').textContent = m.merchant_code;
+  $('big-code').textContent = m.merchant_code;
+
+  const badge = $('status-badge');
+  const labels = { active: 'فعّال', paused: 'متوقف مؤقتاً', suspended: 'موقوف' };
+  badge.textContent = labels[m.status] || m.status;
+  badge.className = 'badge b-' + (m.status || 'active');
+
+  $('plan-type').textContent = m.plan === 'paid' ? 'مدفوعة' : 'تجريبية';
+
+  const quota = Number(m.replies_quota || 0);
+  const used = Number(m.replies_used || 0);
+  $('quota').textContent = quota;
+  $('used').textContent = used;
+  const pct = quota > 0 ? Math.min(100, Math.round((used / quota) * 100)) : 0;
+  $('bar-fill').style.width = pct + '%';
+
+  $('expires').textContent = m.plan_expires_at
+    ? new Date(m.plan_expires_at).toLocaleDateString('ar')
+    : 'بدون تاريخ انتهاء';
+}
+
+/* ---------- التبويب 3: النصوص ---------- */
+function renderTexts() {
+  const box = $('list-text');
+  box.innerHTML = '';
+  if (texts.length === 0) return emptyRow(box, 'لا توجد نصوص بعد');
+
+  texts.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'item';
+    const num = document.createElement('span');
+    num.className = 'num';
+    num.textContent = (i + 1) + '.';
+    const body = document.createElement('span');
+    body.className = 'txt';
+    body.textContent = t.content;
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.textContent = 'حذف';
+    del.addEventListener('click', () => removeText(t.id, del));
+    row.append(num, body, del);
+    box.appendChild(row);
+  });
+}
+
+async function loadTexts() {
+  try {
+    const r = await fetch('/api/text?store=' + encodeURIComponent(merchant.name));
+    const d = await r.json().catch(() => ({}));
+    texts = Array.isArray(d.items) ? d.items : [];
+  } catch (e) { texts = []; }
+  renderTexts();
+}
+
+async function addText() {
+  const btn = $('btn-text');
+  const box = $('text-input');
+  const content = box.value.trim();
+  if (!content) return addLine('✗ اكتب نصاً قبل الإضافة', 'err');
+
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/text', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ store: merchant.name, content })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    texts.push(d.item);
+    renderTexts();
+    box.value = '';
+    addLine('✓ تمت إضافة النص', 'ok');
+  } catch (e) {
+    addLine('✗ فشل إضافة النص: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function removeText(id, btn) {
+  if (!confirm('حذف هذا النص نهائياً؟')) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/text', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    texts = texts.filter(t => t.id !== id);
+    renderTexts();
+    addLine('🗑 تم حذف النص', 'ok');
+  } catch (e) {
+    btn.disabled = false;
+    addLine('✗ فشل الحذف: ' + e.message, 'err');
+  }
+}
+
+/* ---------- التبويب 3: الملفات ---------- */
+function emptyRow(box, msg) {
+  const e = document.createElement('div');
+  e.className = 'empty';
+  e.textContent = msg;
+  box.appendChild(e);
+}
+
+function renderMedia(kind) {
+  const list = media.filter(m => m.kind === kind);
+  const box = $('list-' + kind);
+  box.innerHTML = '';
+  if (list.length === 0) return emptyRow(box, 'لا توجد ملفات بعد');
+
+  list.forEach((it, i) => {
+    const row = document.createElement('div');
+    row.className = 'item';
+    const num = document.createElement('span');
+    num.className = 'num';
+    num.textContent = (i + 1) + '.';
+    const name = document.createElement('span');
+    name.className = 'fn';
+    name.textContent = it.original_name || it.storage_path;
+    name.title = name.textContent;
+    const del = document.createElement('button');
+    del.className = 'del';
+    del.textContent = 'حذف';
+    del.addEventListener('click', () => removeMedia(it, del));
+    row.append(num, name, del);
+    box.appendChild(row);
+  });
+}
+
+function renderAllMedia() { KINDS.forEach(renderMedia); }
+
+async function loadMedia() {
+  try {
+    const r = await fetch('/api/media?store=' + encodeURIComponent(merchant.name));
+    const d = await r.json().catch(() => ({}));
+    media = Array.isArray(d.items) ? d.items : [];
+  } catch (e) { media = []; }
+  renderAllMedia();
+}
+
+async function upload(file, kind) {
+  const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+  let res;
+  try {
+    res = await fetch('/api/upload', {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Store-Name': encodeURIComponent(merchant.name),
+        'X-Media-Kind': kind,
+        'X-File-Ext': ext,
+        'X-Original-Name': encodeURIComponent(file.name)
+      },
+      body: file
+    });
+  } catch (e) {
+    throw new Error('تعذر الاتصال بالسيرفر');
+  }
+  const text = await res.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 200) }; }
+  if (!res.ok) {
+    throw new Error(data.error || data.step || ('HTTP ' + res.status));
+  }
+  return data;
+}
+
+async function removeMedia(it, btn) {
+  if (!confirm('حذف "' + (it.original_name || 'الملف') + '" نهائياً؟')) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch('/api/media', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: it.id, path: it.storage_path })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
+    media = media.filter(m => m.id !== it.id);
+    renderAllMedia();
+    addLine('🗑 تم حذف ' + (it.original_name || 'الملف'), 'ok');
+  } catch (e) {
+    btn.disabled = false;
+    addLine('✗ فشل الحذف: ' + e.message, 'err');
+  }
+}
+
+KINDS.forEach(kind => {
+  const input = $('file-' + kind);
+  input.addEventListener('change', async () => {
+    const files = Array.from(input.files);
+    input.value = '';
+    for (const file of files) {
+      if (file.size > LIMIT) {
+        addLine('✗ ' + file.name + ': الحجم أكبر من 4 ميغابايت', 'err');
+        continue;
+      }
+      const line = addLine('… جاري رفع ' + file.name, 'busy');
+      try {
+        const data = await upload(file, kind);
+        media.push({
+          id: data.id || ('tmp-' + Date.now() + Math.random()),
+          kind,
+          storage_path: data.path,
+          original_name: file.name
+        });
+        renderMedia(kind);
+        line.className = 'ok';
+        line.textContent = '✓ ' + file.name;
+      } catch (e) {
+        line.className = 'err';
+        line.textContent = '✗ ' + file.name + ': ' + e.message;
+      }
+    }
+  });
+});
+
+$('btn-text').addEventListener('click', addText);
+
+/* ---------- البداية ---------- */
+async function init() {
+  try {
+    const r = await fetch('/api/merchant?phone=' + encodeURIComponent(phone));
+    if (!r.ok) { localStorage.removeItem('merchant_phone'); location.href = '/login.html'; return; }
+    merchant = await r.json();
+  } catch (e) {
+    alert('تعذر تحميل بيانات الحساب');
+    return;
+  }
+
+  renderInfo();
+  if (merchant.status !== 'active') {
+    addLine('⚠ حسابك موقوف حالياً، تواصل مع الإدارة', 'err');
+  }
+  renderTexts();
+  renderAllMedia();
+  await Promise.all([loadTexts(), loadMedia()]);
+}
+
+init();
+</script>
+</body>
+</html>
