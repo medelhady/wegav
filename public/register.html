@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>تسجيل تاجر جديد</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;padding:24px;color:#222}
+.card{background:#fff;max-width:420px;margin:auto;padding:24px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+h1{font-size:20px;margin-top:0}
+label{display:block;margin:14px 0 6px;font-weight:600}
+input{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-size:15px}
+button{margin-top:18px;width:100%;padding:12px;background:#1a73e8;color:#fff;border:0;border-radius:8px;font-size:16px;cursor:pointer;font-weight:600}
+button:disabled{opacity:.6;cursor:wait}
+.hint{font-size:13px;color:#666;margin-top:6px}
+#msg{margin-top:16px;font-size:14px;line-height:1.7;min-height:24px}
+.ok{color:#188038}.err{color:#d93025}
+.code{font-size:40px;font-weight:700;text-align:center;letter-spacing:8px;color:#1a73e8;margin:12px 0}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>تسجيل تاجر جديد</h1>
+
+  <label for="name">اسم المتجر</label>
+  <input type="text" id="name" placeholder="مثال: متجر النور">
+
+  <label for="phone">رقم الهاتف (رقم واتساب)</label>
+  <input type="tel" id="phone" placeholder="مثال: 22240403 6" inputmode="numeric">
+  <div class="hint">هذا الرقم سيكون اسم الدخول إلى حسابك</div>
+
+  <button id="btn">تسجيل</button>
+  <div id="msg"></div>
+</div>
+
+<script>
+const btn = document.getElementById('btn');
+const msg = document.getElementById('msg');
+
+function show(text, cls) {
+  msg.className = cls || '';
+  msg.textContent = text;
+}
+
+btn.addEventListener('click', async () => {
+  const name = document.getElementById('name').value.trim();
+  const phone = document.getElementById('phone').value.replace(/\D/g, '');
+
+  if (name.length < 2) return show('اكتب اسم المتجر', 'err');
+  if (phone.length < 8) return show('اكتب رقم هاتف صحيحاً', 'err');
+
+  btn.disabled = true;
+  show('جاري التسجيل...');
+
+  try {
+    const res = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, phone })
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      const extra = data.merchant_code ? ' (كودك: ' + data.merchant_code + ')' : '';
+      return show((data.error || 'فشل التسجيل') + extra, 'err');
+    }
+
+    msg.className = 'ok';
+    msg.innerHTML = '';
+    const title = document.createElement('div');
+    title.textContent = 'تم تسجيل متجرك بنجاح ✓ كودك هو:';
+    const code = document.createElement('div');
+    code.className = 'code';
+    code.textContent = data.merchant_code;
+    const note = document.createElement('div');
+    note.className = 'hint';
+    note.textContent = 'احفظ هذا الكود، وأرسله لزبائنك ليكتبوه للبوت. تجربتك المجانية: ' + data.replies_quota + ' رداً.';
+    msg.append(title, code, note);
+  } catch (e) {
+    show('تعذر الاتصال بالسيرفر', 'err');
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
