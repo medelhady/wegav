@@ -129,7 +129,7 @@ input[type=file]{display:none}
     </div>
   </div>
 
-  <!-- التبويب 3: النصوص والملفات -->
+  <!-- التبويب 3 -->
   <div class="panel" id="t3">
     <div class="sec">
       <h3>📝 النصوص</h3>
@@ -284,10 +284,21 @@ function renderReplies() {
     row.style.flexDirection = 'column';
     row.style.alignItems = 'stretch';
 
-    const top = document.createElement('div');
-    top.style.display = 'flex';
-    top.style.alignItems = 'center';
-    top.style.gap = '8px';
+    // الكلمات في الأعلى
+    const kw = document.createElement('div');
+    kw.className = 'kw';
+    (r.keywords || []).forEach(k => {
+      const s = document.createElement('span');
+      s.textContent = k;
+      kw.appendChild(s);
+    });
+
+    // الرد تحت الكلمات
+    const bottom = document.createElement('div');
+    bottom.style.display = 'flex';
+    bottom.style.alignItems = 'center';
+    bottom.style.gap = '8px';
+    bottom.style.marginTop = '6px';
 
     const num = document.createElement('span');
     num.className = 'num';
@@ -303,17 +314,8 @@ function renderReplies() {
     del.textContent = 'حذف';
     del.addEventListener('click', () => removeReply(r.id, del));
 
-    top.append(num, label, del);
-
-    const kw = document.createElement('div');
-    kw.className = 'kw';
-    (r.keywords || []).forEach(k => {
-      const s = document.createElement('span');
-      s.textContent = k;
-      kw.appendChild(s);
-    });
-
-    row.append(top, kw);
+    bottom.append(num, label, del);
+    row.append(kw, bottom);
     box.appendChild(row);
   });
 }
