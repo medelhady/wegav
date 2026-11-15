@@ -1,6 +1,7 @@
 const TEXT_MAX = 1000;
 const KEYWORDS_MAX = 20;
 const KEYWORD_LEN_MAX = 60;
+const ALBUM_MAX = 10;
 
 function headersFor(key) {
   return {
@@ -24,8 +25,7 @@ function normalize(text) {
 
 function parseKeywords(input) {
   const list = Array.isArray(input) ? input : String(input || '').split(/[,،\n]/);
-  const cleaned = list.map(normalize).filter(Boolean);
-  return [...new Set(cleaned)];
+  return [...new Set(list.map(normalize).filter(Boolean))];
 }
 
 async function getStoreId(url, key, name) {
@@ -39,18 +39,18 @@ async function getStoreId(url, key, name) {
 
 async function findConflicts(url, key, storeId, keywords) {
   const r = await fetch(
-    `${url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords`,
+    `${url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=keywords`,
     { headers: headersFor(key) }
   );
   const rows = await r.json();
   if (!Array.isArray(rows)) return [];
-  const conflicts = [];
+  const hit = new Set();
   for (const row of rows) {
     for (const k of row.keywords || []) {
-      if (keywords.includes(k)) conflicts.push(k);
+      if (keywords.includes(k)) hit.add(k);
     }
   }
-  return [...new Set(conflicts)];
+  return [...hit];
 }
 
 export default async function handler(req, res) {
@@ -68,7 +68,7 @@ export default async function handler(req, res) {
 
       const r = await fetch(
         `${url}/rest/v1/auto_replies?store_id=eq.${storeId}` +
-          `&select=id,keywords,kind,content,media_id,created_at&order=created_at.asc`,
+          `&select=id,keywords,kind,content,media_id,media_ids,created_at&order=created_at.asc`,
         { headers: headersFor(key) }
       );
       const data = await r.json();
@@ -88,7 +88,7 @@ export default async function handler(req, res) {
       const keywords = parseKeywords(body.keywords);
 
       if (!name) return res.status(400).json({ error: 'Missing store' });
-      if (!['text', 'audio', 'image', 'video'].includes(kind)) {
+      if (!['text', 'audio', 'image', 'video', 'album'].includes(kind)) {
         return res.status(400).json({ error: 'Invalid kind' });
       }
       if (keywords.length === 0) {
@@ -103,11 +103,20 @@ export default async function handler(req, res) {
 
       let content = null;
       let mediaId = null;
+      let mediaIds = [];
+
       if (kind === 'text') {
         content = String(body.content || '').trim();
         if (!content) return res.status(400).json({ error: 'الرد النصي فارغ' });
         if (content.length > TEXT_MAX) {
           return res.status(400).json({ error: 'الرد أطول من ' + TEXT_MAX + ' حرف' });
+        }
+      } else if (kind === 'album') {
+        const list = Array.isArray(body.media_ids) ? body.media_ids : [];
+        mediaIds = list.map(String).filter(id => /^[0-9a-f-]{36}$/i.test(id));
+        if (mediaIds.length === 0) return res.status(400).json({ error: 'اختر صوراً للألبوم' });
+        if (mediaIds.length > ALBUM_MAX) {
+          return res.status(400).json({ error: 'أقصى عدد للصور في الألبوم ' + ALBUM_MAX });
         }
       } else {
         mediaId = String(body.media_id || '');
@@ -135,6 +144,7 @@ export default async function handler(req, res) {
           kind,
           content,
           media_id: mediaId,
+          media_ids: mediaIds,
         }),
       });
       const data = await r.json();
