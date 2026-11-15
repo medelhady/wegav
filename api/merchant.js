@@ -8,12 +8,15 @@ export default async function handler(req, res) {
     const key = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
     if (!url || !key) return res.status(500).json({ error: 'Env missing' });
 
-    const name = String(req.query.store || '').trim();
-    if (!name) return res.status(400).json({ error: 'Missing store' });
+    // تنظيف الرقم: نحتفظ بالأرقام فقط
+    const phone = String(req.query.phone || '').replace(/\D/g, '');
+    if (phone.length < 8) {
+      return res.status(400).json({ error: 'Invalid phone' });
+    }
 
     const r = await fetch(
-      `${url}/rest/v1/stores?name=eq.${encodeURIComponent(name)}` +
-        `&select=name,merchant_code,status,plan,replies_quota,replies_used,plan_expires_at`,
+      `${url}/rest/v1/stores?phone=eq.${encodeURIComponent(phone)}` +
+        `&select=id,name,phone,merchant_code,status,plan,replies_quota,replies_used,plan_expires_at`,
       { headers: { Authorization: `Bearer ${key}`, apikey: key } }
     );
     const data = await r.json();
