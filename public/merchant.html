@@ -69,7 +69,7 @@ input[type=file]{display:none}
     <button class="tab" data-tab="t3">سجل الزبائن</button>
   </div>
 
-  <!-- التبويب 1: الكود والحصة -->
+  <!-- التبويب 1 -->
   <div class="panel active" id="t1">
     <div class="big-code" id="big-code">---</div>
     <div class="grid" style="margin-top:16px">
@@ -109,6 +109,7 @@ input[type=file]{display:none}
         <option value="audio">صوت</option>
         <option value="image">صورة</option>
         <option value="video">فيديو</option>
+        <option value="album">ألبوم صور (عدة صور كرد واحد)</option>
       </select>
 
       <div id="text-box" style="margin-top:12px">
@@ -120,6 +121,13 @@ input[type=file]{display:none}
         <input type="file" id="media-file">
         <div class="file-name" id="file-name">لم يُختر ملف</div>
         <div class="hint">الحد الأقصى 4 ميغابايت</div>
+      </div>
+
+      <div id="album-box" style="margin-top:12px;display:none">
+        <label class="btn file" for="album-files">اختر الصور (حتى 10)</label>
+        <input type="file" id="album-files" accept="image/*" multiple>
+        <div class="file-name" id="album-name">لم تُختر صور</div>
+        <div class="hint">ستُرسل الصور للزبون بالترتيب الذي تختاره هنا</div>
       </div>
 
       <div style="text-align:left;margin-top:12px">
@@ -134,7 +142,7 @@ input[type=file]{display:none}
     </div>
   </div>
 
-  <!-- التبويب 3: سجل الزبائن -->
+  <!-- التبويب 3 -->
   <div class="panel" id="t3">
     <div class="note">
       هنا ستظهر أرقام الزبائن الذين راسلوا البوت، وعدد مرات الرد عليهم.
@@ -151,7 +159,8 @@ if (!phone) location.href = '/login.html';
 let merchant = null;
 let replies = [];
 const LIMIT = 4 * 1024 * 1024;
-const KIND_LABEL = { text: 'نص', audio: 'صوت', image: 'صورة', video: 'فيديو' };
+const ALBUM_MAX = 10;
+const KIND_LABEL = { text: 'نص', audio: 'صوت', image: 'صورة', video: 'فيديو', album: 'ألبوم' };
 const ACCEPT = { audio: 'audio/*', image: 'image/*', video: 'video/*' };
 
 const $ = id => document.getElementById(id);
@@ -217,16 +226,31 @@ function renderInfo() {
 function toggleReplyInputs() {
   const kind = $('reply-kind').value;
   const isText = kind === 'text';
+  const isAlbum = kind === 'album';
   $('text-box').style.display = isText ? 'block' : 'none';
-  $('media-box').style.display = isText ? 'none' : 'block';
-  if (!isText) $('media-file').accept = ACCEPT[kind];
+  $('media-box').style.display = (!isText && !isAlbum) ? 'block' : 'none';
+  $('album-box').style.display = isAlbum ? 'block' : 'none';
+  if (!isText && !isAlbum) $('media-file').accept = ACCEPT[kind];
   $('media-file').value = '';
   $('file-name').textContent = 'لم يُختر ملف';
+  $('album-files').value = '';
+  $('album-name').textContent = 'لم تُختر صور';
 }
 
 $('media-file').addEventListener('change', () => {
   const f = $('media-file').files[0];
   $('file-name').textContent = f ? f.name : 'لم يُختر ملف';
+});
+
+$('album-files').addEventListener('change', () => {
+  const files = Array.from($('album-files').files);
+  if (files.length > ALBUM_MAX) {
+    addLine('✗ الحد الأقصى ' + ALBUM_MAX + ' صور', 'err');
+    $('album-files').value = '';
+    $('album-name').textContent = 'لم تُختر صور';
+    return;
+  }
+  $('album-name').textContent = files.length ? files.length + ' صورة مختارة' : 'لم تُختر صور';
 });
 
 function renderReplies() {
@@ -255,8 +279,13 @@ function renderReplies() {
 
     const label = document.createElement('span');
     label.className = 'txt';
-    label.textContent = KIND_LABEL[r.kind] + ': ' +
-      (r.kind === 'text' ? r.content : 'ملف مرفق');
+    if (r.kind === 'text') {
+      label.textContent = 'نص: ' + r.content;
+    } else if (r.kind === 'album') {
+      label.textContent = 'ألبوم: ' + (r.media_ids || []).length + ' صورة';
+    } else {
+      label.textContent = (KIND_LABEL[r.kind] || r.kind) + ': ملف مرفق';
+    }
 
     const del = document.createElement('button');
     del.className = 'del';
@@ -278,7 +307,6 @@ async function loadReplies() {
   renderReplies();
 }
 
-// رفع الملف وإرجاع معرّفه من جدول media_files
 async function uploadMedia(file, kind) {
   const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
   let res;
@@ -302,7 +330,6 @@ async function uploadMedia(file, kind) {
   try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 200) }; }
   if (!res.ok) throw new Error(data.error || data.step || ('HTTP ' + res.status));
 
-  // نجلب الملف من القائمة لنحصل على معرّفه
   const lr = await fetch('/api/media?store=' + encodeURIComponent(merchant.name));
   const ld = await lr.json().catch(() => ({}));
   const found = (ld.items || []).find(m => m.storage_path === data.path);
@@ -318,20 +345,38 @@ async function saveReply() {
   if (!keywords) return addLine('✗ اكتب كلمة واحدة على الأقل', 'err');
 
   const payload = { store: merchant.name, keywords, kind };
-  const file = $('media-file').files[0];
 
   if (kind === 'text') {
     const content = $('reply-text').value.trim();
     if (!content) return addLine('✗ اكتب نص الرد', 'err');
     payload.content = content;
+  } else if (kind === 'album') {
+    const files = Array.from($('album-files').files);
+    if (files.length === 0) return addLine('✗ اختر صوراً للألبوم', 'err');
+    if (files.length > ALBUM_MAX) return addLine('✗ الحد الأقصى ' + ALBUM_MAX + ' صور', 'err');
+    for (const f of files) {
+      if (f.size > LIMIT) return addLine('✗ ' + f.name + ': الحجم أكبر من 4 ميغابايت', 'err');
+    }
   } else {
+    const file = $('media-file').files[0];
     if (!file) return addLine('✗ اختر ملفاً أولاً', 'err');
     if (file.size > LIMIT) return addLine('✗ الحجم أكبر من 4 ميغابايت', 'err');
   }
 
   btn.disabled = true;
   try {
-    if (kind !== 'text') {
+    if (kind === 'album') {
+      const files = Array.from($('album-files').files);
+      const ids = [];
+      for (const f of files) {
+        const line = addLine('… جاري رفع ' + f.name, 'busy');
+        ids.push(await uploadMedia(f, 'image'));
+        line.className = 'ok';
+        line.textContent = '✓ ' + f.name;
+      }
+      payload.media_ids = ids;
+    } else if (kind !== 'text') {
+      const file = $('media-file').files[0];
       const line = addLine('… جاري رفع ' + file.name, 'busy');
       payload.media_id = await uploadMedia(file, kind);
       line.className = 'ok';
@@ -350,6 +395,8 @@ async function saveReply() {
     $('reply-text').value = '';
     $('media-file').value = '';
     $('file-name').textContent = 'لم يُختر ملف';
+    $('album-files').value = '';
+    $('album-name').textContent = 'لم تُختر صور';
     await loadReplies();
     addLine('✓ تم حفظ الرد', 'ok');
   } catch (e) {
