@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>دخول التاجر</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;padding:24px;color:#222}
+.card{background:#fff;max-width:420px;margin:auto;padding:24px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.08)}
+h1{font-size:20px;margin-top:0}
+label{display:block;margin:14px 0 6px;font-weight:600}
+input{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-size:15px}
+button{margin-top:18px;width:100%;padding:12px;background:#1a73e8;color:#fff;border:0;border-radius:8px;font-size:16px;cursor:pointer;font-weight:600}
+button:disabled{opacity:.6;cursor:wait}
+.hint{font-size:13px;color:#666;margin-top:6px}
+#msg{margin-top:16px;font-size:14px;line-height:1.7;min-height:24px}
+.err{color:#d93025}
+a{color:#1a73e8}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>دخول التاجر</h1>
+
+  <label for="phone">رقم الهاتف</label>
+  <input type="tel" id="phone" placeholder="مثال: 44974444" inputmode="numeric">
+  <div class="hint">الرقم الذي سجلت به متجرك</div>
+
+  <button id="btn">دخول</button>
+  <div id="msg"></div>
+
+  <div class="hint" style="margin-top:18px">ليس لديك حساب؟ <a href="/register.html">سجّل متجرك هنا</a></div>
+</div>
+
+<script>
+const btn = document.getElementById('btn');
+const msg = document.getElementById('msg');
+
+function show(text, cls) {
+  msg.className = cls || '';
+  msg.textContent = text;
+}
+
+btn.addEventListener('click', async () => {
+  const phone = document.getElementById('phone').value.replace(/\D/g, '');
+  if (phone.length < 8) return show('اكتب رقم هاتف صحيحاً', 'err');
+
+  btn.disabled = true;
+  show('جاري التحقق...');
+
+  try {
+    const res = await fetch('/api/merchant?phone=' + phone);
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      return show(res.status === 404 ? 'هذا الرقم غير مسجل' : (data.error || 'فشل الدخول'), 'err');
+    }
+    if (data.status !== 'active') {
+      return show('حسابك موقوف حالياً، تواصل مع الإدارة', 'err');
+    }
+
+    localStorage.setItem('merchant_phone', phone);
+    location.href = '/merchant.html';
+  } catch (e) {
+    show('تعذر الاتصال بالسيرفر', 'err');
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
