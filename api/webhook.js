@@ -31,6 +31,7 @@ function parseKeywords(text) {
 
 const ADD_CMD = normalize('إضافة');
 const CANCEL_CMD = normalize('إلغاء');
+const HELP_CMD = normalize('قائمة');
 
 function sbHeaders(key) {
   return { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json' };
@@ -64,11 +65,27 @@ async function setSession(cfg, phone, patch) {
   if (!r.ok) throw new Error('session save failed');
 }
 
-async function findStoreByPhone(cfg, from) {
-  // رقم واتساب يأتي بمفتاح الدولة 222، ونخزّنه غالباً بدونه
+async function getStoreById(cfg, id) {
+  const r = await fetch(`${cfg.url}/rest/v1/stores?id=eq.${id}&select=id,name,status,merchant_code`, {
+    headers: sbHeaders(cfg.key),
+  });
+  const rows = await r.json();
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
+async function getStoreByPhone(cfg, from) {
   const local = from.length > 8 && from.startsWith('222') ? from.slice(3) : from;
   const r = await fetch(
-    `${cfg.url}/rest/v1/stores?phone=in.(${from},${local})&select=id,name,status`,
+    `${cfg.url}/rest/v1/stores?phone=in.(${from},${local})&select=id,name,status,merchant_code`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const rows = await r.json();
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
+async function getStoreByCode(cfg, code) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/stores?merchant_code=eq.${code}&select=id,name,status,merchant_code`,
     { headers: sbHeaders(cfg.key) }
   );
   const rows = await r.json();
@@ -90,6 +107,21 @@ async function findConflicts(cfg, storeId, keywords) {
   return [...hit];
 }
 
+async function findReplyForText(cfg, storeId, text) {
+  const cleaned = normalize(text);
+  const r = await fetch(
+    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}` +
+      `&select=id,keywords,kind,content,media_id`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const rows = await r.json();
+  if (!Array.isArray(rows)) return null;
+  for (const row of rows) {
+    if ((row.keywords || []).includes(cleaned)) return row;
+  }
+  return null;
+}
+
 async function sendText(cfg, phoneNumberId, to, body) {
   const r = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
     method: 'POST',
@@ -99,7 +131,46 @@ async function sendText(cfg, phoneNumberId, to, body) {
   if (!r.ok) console.error('send failed', r.status, (await r.text()).slice(0, 200));
 }
 
-// تحميل الملف من Meta ثم حفظه في Supabase وتسجيله في media_files
+async function sendMediaReply(cfg, phoneNumberId, to, kind, mediaRow) {
+  const sr = await fetch(
+    `${cfg.url}/storage/v1/object/sign/${BUCKET}/${encodeURI(mediaRow.storage_path)}`,
+    {
+      method: 'POST',
+      headers: sbHeaders(cfg.key),
+      body: JSON.stringify({ expiresIn: 300 }),
+    }
+  );
+  const sd = await sr.json();
+  if (!sr.ok || !sd.signedURL) {
+    console.error('sign failed', JSON.stringify(sd).slice(0, 200));
+    return;
+  }
+  const link = `${cfg.url}/storage/v1${sd.signedURL}`;
+  const type = kind === 'audio' ? 'audio' : kind === 'image' ? 'image' : 'video';
+  const r = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      messaging_product: 'whatsapp',
+      to,
+      type,
+      [type]: { link },
+    }),
+  });
+  if (!r.ok) console.error('media send failed', r.status, (await r.text()).slice(0, 200));
+}
+
+async function sendReply(cfg, phoneNumberId, to, row) {
+  if (row.kind === 'text') return sendText(cfg, phoneNumberId, to, row.content);
+  const mr = await fetch(
+    `${cfg.url}/rest/v1/media_files?id=eq.${row.media_id}&select=kind,storage_path`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const [mf] = await mr.json();
+  if (!mf) return;
+  return sendMediaReply(cfg, phoneNumberId, to, mf.kind, mf);
+}
+
 async function storeIncomingMedia(cfg, store, msg, type) {
   const obj = msg[type] || {};
   if (!obj.id) throw new Error('no media id');
@@ -143,24 +214,15 @@ async function storeIncomingMedia(cfg, store, msg, type) {
   return row.id;
 }
 
-async function handleMessage(cfg, phoneNumberId, msg) {
-  const from = String(msg.from || '');
+async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   const type = msg.type;
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
   const cmd = normalize(text);
   const isMedia = MEDIA_TYPES.includes(type);
 
-  const store = await findStoreByPhone(cfg, from);
-  if (!store) {
-    return sendText(cfg, phoneNumberId, from,
-      'مرحباً، أرسل كود المتجر المكون من 3 أرقام للحصول على الردود.');
-  }
-
   if (store.status !== 'active') {
     return sendText(cfg, phoneNumberId, from, 'حسابك موقوف حالياً، تواصل مع الإدارة.');
   }
-
-  const session = await getSession(cfg, from);
 
   if (cmd === CANCEL_CMD || text === '0') {
     await setSession(cfg, from, { state: 'idle', keywords: [], pending_text: null, pending_media_id: null });
@@ -169,8 +231,7 @@ async function handleMessage(cfg, phoneNumberId, msg) {
 
   if (cmd === ADD_CMD) {
     await setSession(cfg, from, { state: 'await_reply', keywords: [], pending_text: null, pending_media_id: null });
-    return sendText(cfg, phoneNumberId, from,
-      'أرسل الرد الآن: نص، أو صوت، أو صورة، أو فيديو.');
+    return sendText(cfg, phoneNumberId, from, 'أرسل الرد الآن: نص، أو صوت، أو صورة، أو فيديو.');
   }
 
   if (session.state === 'await_reply') {
@@ -180,13 +241,13 @@ async function handleMessage(cfg, phoneNumberId, msg) {
       }
       await setSession(cfg, from, { state: 'await_keywords', pending_text: text, pending_media_id: null });
       return sendText(cfg, phoneNumberId, from,
-        'تم استلام النص. اكتب الكلمات التي سيرد بها، مفصولة بفاصلة.');
+        'تم استلام النص. اكتب الكلمات التي سيرد بها، مفصولة بفاصلة أو بسطر لكل كلمة.');
     }
     if (isMedia) {
       const mediaId = await storeIncomingMedia(cfg, store, msg, type);
       await setSession(cfg, from, { state: 'await_keywords', pending_text: null, pending_media_id: mediaId });
       return sendText(cfg, phoneNumberId, from,
-        'تم استلام الملف. اكتب الكلمات التي سيرد بها، مفصولة بفاصلة.');
+        'تم استلام الملف. اكتب الكلمات التي سيرد بها، مفصولة بفاصلة أو بسطر لكل كلمة.');
     }
     return sendText(cfg, phoneNumberId, from, 'أرسل نصاً أو صوتاً أو صورة أو فيديو.');
   }
@@ -201,8 +262,7 @@ async function handleMessage(cfg, phoneNumberId, msg) {
     if (type === 'text' && text) {
       const keywords = parseKeywords(text);
       if (keywords.length === 0 || keywords.length > KEYWORDS_MAX) {
-        return sendText(cfg, phoneNumberId, from,
-          'اكتب من 1 إلى ' + KEYWORDS_MAX + ' كلمة، مفصولة بفاصلة.');
+        return sendText(cfg, phoneNumberId, from, 'اكتب من 1 إلى ' + KEYWORDS_MAX + ' كلمة.');
       }
       if (keywords.some(k => k.length > KEYWORD_LEN_MAX)) {
         return sendText(cfg, phoneNumberId, from, 'إحدى الكلمات طويلة جداً.');
@@ -238,6 +298,53 @@ async function handleMessage(cfg, phoneNumberId, msg) {
 
   return sendText(cfg, phoneNumberId, from,
     'أرسل "إضافة" لإضافة رد جديد، أو "إلغاء" للإلغاء.');
+}
+
+async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
+  const type = msg.type;
+  const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
+  const cmd = normalize(text);
+
+  // الزبون أرسل كود المتجر (3 أرقام)
+  if (/^\d{3}$/.test(text)) {
+    const store = await getStoreByCode(cfg, text);
+    if (!store || store.status !== 'active') {
+      return sendText(cfg, phoneNumberId, from, 'الكود غير صحيح أو المتجر غير متاح.');
+    }
+    await setSession(cfg, from, { state: 'customer', active_store_id: store.id });
+    return sendText(cfg, phoneNumberId, from,
+      'مرحباً بك في ' + store.name + '. اكتب كلمة للحصول على الرد.');
+  }
+
+  // الزبون مرتبط بمتجر
+  if (session.active_store_id) {
+    const store = await getStoreById(cfg, session.active_store_id);
+    if (!store || store.status !== 'active') {
+      await setSession(cfg, from, { state: 'idle', active_store_id: null });
+      return sendText(cfg, phoneNumberId, from, 'المتجر غير متاح حالياً.');
+    }
+
+    if (type === 'text' && text) {
+      const row = await findReplyForText(cfg, store.id, text);
+      if (row) return sendReply(cfg, phoneNumberId, from, row);
+    }
+    return sendText(cfg, phoneNumberId, from,
+      'لم أفهم طلبك. اكتب كلمة مثل: سلام، أو أرسل كود المتجر للتغيير.');
+  }
+
+  return sendText(cfg, phoneNumberId, from,
+    'مرحباً، أرسل كود المتجر المكون من 3 أرقام للحصول على الردود.');
+}
+
+async function handleMessage(cfg, phoneNumberId, msg) {
+  const from = String(msg.from || '');
+  const session = await getSession(cfg, from);
+
+  const store = await getStoreByPhone(cfg, from);
+  if (store) {
+    return handleMerchant(cfg, phoneNumberId, from, store, msg, session);
+  }
+  return handleCustomer(cfg, phoneNumberId, from, msg, session);
 }
 
 export default async function handler(req, res) {
