@@ -1,5 +1,6 @@
-const KEYWORD_MAX = 60;
 const TEXT_MAX = 1000;
+const KEYWORDS_MAX = 20;
+const KEYWORD_LEN_MAX = 60;
 
 function headersFor(key) {
   return {
@@ -9,7 +10,7 @@ function headersFor(key) {
   };
 }
 
-// تطبيع الكلمة: حروف صغيرة، بدون تشكيل، ومسافات مفردة
+// تطبيع الكلمة: حروف صغيرة، بدون تشكيل، وتوحيد الهمزات والتاء المربوطة
 function normalize(text) {
   return String(text || '')
     .normalize('NFKC')
@@ -22,6 +23,13 @@ function normalize(text) {
     .trim();
 }
 
+// تحويل الإدخال (نص مفصول بفواصل أو قائمة) إلى كلمات مطبّعة وبدون تكرار
+function parseKeywords(input) {
+  const list = Array.isArray(input) ? input : String(input || '').split(/[,،\n]/);
+  const cleaned = list.map(normalize).filter(Boolean);
+  return [...new Set(cleaned)];
+}
+
 async function getStoreId(url, key, name) {
   const r = await fetch(
     `${url}/rest/v1/stores?name=eq.${encodeURIComponent(name)}&select=id`,
@@ -29,6 +37,24 @@ async function getStoreId(url, key, name) {
   );
   const found = await r.json();
   return Array.isArray(found) && found[0]?.id ? found[0].id : null;
+}
+
+// هل توجد أي كلمة من القائمة مستخدمة في رد آخر للمتجر؟
+async function findConflicts(url, key, storeId, keywords, ignoreId) {
+  const r = await fetch(
+    `${url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords`,
+    { headers: headersFor(key) }
+  );
+  const rows = await r.json();
+  if (!Array.isArray(rows)) return [];
+  const conflicts = [];
+  for (const row of rows) {
+    if (row.id === ignoreId) continue;
+    for (const k of row.keywords || []) {
+      if (keywords.includes(k)) conflicts.push(k);
+    }
+  }
+  return [...new Set(conflicts)];
 }
 
 export default async function handler(req, res) {
@@ -46,7 +72,7 @@ export default async function handler(req, res) {
 
       const r = await fetch(
         `${url}/rest/v1/auto_replies?store_id=eq.${storeId}` +
-          `&select=id,keyword,kind,content,media_id,created_at&order=created_at.asc`,
+          `&select=id,keywords,kind,content,media_id,created_at&order=created_at.asc`,
         { headers: headersFor(key) }
       );
       const data = await r.json();
@@ -63,13 +89,17 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const name = String(body.store || '').trim();
       const kind = String(body.kind || '');
-      const keyword = body.keyword ? normalize(body.keyword) : null;
+      const keywords = parseKeywords(body.keywords);
+
       if (!name) return res.status(400).json({ error: 'Missing store' });
       if (!['text', 'audio', 'image', 'video'].includes(kind)) {
         return res.status(400).json({ error: 'Invalid kind' });
       }
-      if (keyword && keyword.length > KEYWORD_MAX) {
-        return res.status(400).json({ error: 'الكلمة طويلة جداً' });
+      if (keywords.length > KEYWORDS_MAX) {
+        return res.status(400).json({ error: 'أقصى عدد للكلمات ' + KEYWORDS_MAX });
+      }
+      if (keywords.some(k => k.length > KEYWORD_LEN_MAX)) {
+        return res.status(400).json({ error: 'إحدى الكلمات طويلة جداً' });
       }
 
       let content = null;
@@ -81,51 +111,4 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'الرد أطول من ' + TEXT_MAX + ' حرف' });
         }
       } else {
-        mediaId = String(body.media_id || '');
-        if (!/^[0-9a-f-]{36}$/i.test(mediaId)) {
-          return res.status(400).json({ error: 'اختر ملفاً صالحاً' });
-        }
-      }
-
-      const storeId = await getStoreId(url, key, name);
-      if (!storeId) return res.status(404).json({ error: 'المتجر غير موجود' });
-
-      const r = await fetch(`${url}/rest/v1/auto_replies`, {
-        method: 'POST',
-        headers: { ...headersFor(key), Prefer: 'return=representation' },
-        body: JSON.stringify({
-          store_id: storeId,
-          keyword,
-          kind,
-          content,
-          media_id: mediaId,
-        }),
-      });
-      const data = await r.json();
-      if (!r.ok) {
-        const dup = JSON.stringify(data).includes('duplicate');
-        return res.status(dup ? 409 : 500).json({
-          error: dup ? 'هذه الكلمة موجودة مسبقاً في ردودك' : 'Save failed',
-          details: data,
-        });
-      }
-      return res.status(200).json({ ok: true, item: data[0] });
-    }
-
-    if (req.method === 'DELETE') {
-      const id = String(body.id || '');
-      if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'Invalid id' });
-
-      const r = await fetch(`${url}/rest/v1/auto_replies?id=eq.${id}`, {
-        method: 'DELETE',
-        headers: headersFor(key),
-      });
-      if (!r.ok) return res.status(500).json({ error: 'Delete failed', status: r.status });
-      return res.status(200).json({ ok: true });
-    }
-
-    return res.status(405).json({ error: 'Method not allowed' });
-  } catch (err) {
-    return res.status(500).json({ error: 'exception', message: String(err?.message || err) });
-  }
-}
+        mediaId =
