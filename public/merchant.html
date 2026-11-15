@@ -27,22 +27,24 @@ body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;color:#222}
 .b-active{background:#e6f4ea;color:#188038}
 .b-paused{background:#fef7e0;color:#b06000}
 .b-suspended{background:#fce8e6;color:#d93025}
-.sec{margin-top:16px;padding-top:4px}
-.sec h3{font-size:15px;margin:10px 0 6px}
+.sec{margin-top:6px}
+.sec h3{font-size:15px;margin:14px 0 6px}
 textarea,input[type=text],select{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:inherit;font-size:14px}
-textarea{min-height:70px;resize:vertical}
+textarea{min-height:90px;resize:vertical}
 .btn{background:#1a73e8;color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer;font-weight:600;font-size:14px}
 .btn:disabled{opacity:.5;cursor:wait}
 .btn.file{display:inline-block}
 input[type=file]{display:none}
+.file-name{font-size:13px;color:#555;margin-top:6px;direction:ltr;text-align:right}
 .hint{font-size:12px;color:#777;margin-top:4px}
-.item{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px dashed #eee;font-size:14px}
+.item{padding:10px 0;border-bottom:1px dashed #eee;font-size:14px}
+.row{display:flex;align-items:center;gap:8px}
 .num{color:#1a73e8;font-weight:700;min-width:26px}
 .txt{flex:1;word-break:break-word}
-.kw{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.kw{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
 .kw span{background:#eef4fe;color:#1a73e8;border-radius:10px;padding:2px 8px;font-size:12px}
-.fn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:ltr;text-align:left}
 .del{background:#fff;color:#d93025;border:1px solid #f1b3ad;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px}
+.del:disabled{opacity:.5;cursor:wait}
 .empty{font-size:13px;color:#999;padding:8px 0}
 .note{font-size:13px;color:#666;background:#f7f9fc;border-radius:8px;padding:12px;line-height:1.8}
 #log{margin-top:14px;font-size:13px;line-height:1.7}
@@ -63,12 +65,11 @@ input[type=file]{display:none}
 
   <div class="tabs">
     <button class="tab active" data-tab="t1">الكود والحصة</button>
-    <button class="tab" data-tab="t2">القائمة المرقمة</button>
-    <button class="tab" data-tab="t3">النصوص والملفات</button>
-    <button class="tab" data-tab="t4">سجل الزبائن</button>
+    <button class="tab" data-tab="t2">الإضافة</button>
+    <button class="tab" data-tab="t3">سجل الزبائن</button>
   </div>
 
-  <!-- التبويب 1 -->
+  <!-- التبويب 1: الكود والحصة -->
   <div class="panel active" id="t1">
     <div class="big-code" id="big-code">---</div>
     <div class="grid" style="margin-top:16px">
@@ -95,32 +96,36 @@ input[type=file]{display:none}
     </div>
   </div>
 
-  <!-- التبويب 2: القائمة المرقمة -->
+  <!-- التبويب 2: الإضافة -->
   <div class="panel" id="t2">
     <div class="sec">
       <h3>➕ إضافة رد</h3>
+
       <input type="text" id="kw-input" placeholder="مثال: سلام، مرحبا، السلام عليكم">
       <div class="hint">اكتب الكلمات مفصولة بفاصلة. أي كلمة منها ستحصل على هذا الرد.</div>
 
-      <select id="reply-kind" style="margin-top:10px">
+      <select id="reply-kind" style="margin-top:12px">
         <option value="text">نص</option>
         <option value="audio">صوت</option>
         <option value="image">صورة</option>
         <option value="video">فيديو</option>
       </select>
 
-      <div id="text-box" style="margin-top:10px">
+      <div id="text-box" style="margin-top:12px">
         <textarea id="reply-text" maxlength="1000" placeholder="اكتب الرد النصي هنا"></textarea>
       </div>
 
-      <div id="media-box" style="margin-top:10px;display:none">
-        <select id="media-select"></select>
-        <div class="hint">اختر ملفاً سبق أن رفعته من تبويب النصوص والملفات.</div>
+      <div id="media-box" style="margin-top:12px;display:none">
+        <label class="btn file" for="media-file">اختر الملف</label>
+        <input type="file" id="media-file">
+        <div class="file-name" id="file-name">لم يُختر ملف</div>
+        <div class="hint">الحد الأقصى 4 ميغابايت</div>
       </div>
 
-      <div style="text-align:left;margin-top:10px">
+      <div style="text-align:left;margin-top:12px">
         <button class="btn" id="btn-reply">حفظ الرد</button>
       </div>
+      <div id="log"></div>
     </div>
 
     <div class="sec">
@@ -129,43 +134,8 @@ input[type=file]{display:none}
     </div>
   </div>
 
-  <!-- التبويب 3 -->
+  <!-- التبويب 3: سجل الزبائن -->
   <div class="panel" id="t3">
-    <div class="sec">
-      <h3>📝 النصوص</h3>
-      <textarea id="text-input" maxlength="1000" placeholder="اكتب النص هنا (حتى 1000 حرف)"></textarea>
-      <div style="text-align:left;margin-top:8px">
-        <button class="btn" id="btn-text">إضافة النص</button>
-      </div>
-      <div id="list-text"></div>
-    </div>
-
-    <div class="sec">
-      <h3>🎤 الأصوات</h3>
-      <label class="btn file" for="file-audio">اختر أصواتاً</label>
-      <input type="file" id="file-audio" accept="audio/*" multiple>
-      <div id="list-audio"></div>
-    </div>
-
-    <div class="sec">
-      <h3>🖼️ الصور</h3>
-      <label class="btn file" for="file-image">اختر صوراً</label>
-      <input type="file" id="file-image" accept="image/*" multiple>
-      <div id="list-image"></div>
-    </div>
-
-    <div class="sec">
-      <h3>🎬 الفيديوهات</h3>
-      <label class="btn file" for="file-video">اختر فيديوهات</label>
-      <input type="file" id="file-video" accept="video/*" multiple>
-      <div id="list-video"></div>
-    </div>
-
-    <div id="log"></div>
-  </div>
-
-  <!-- التبويب 4 -->
-  <div class="panel" id="t4">
     <div class="note">
       هنا ستظهر أرقام الزبائن الذين راسلوا البوت، وعدد مرات الرد عليهم.
       سيتم تفعيلها بعد تجهيز تسجيل الرسائل.
@@ -179,12 +149,10 @@ const phone = localStorage.getItem('merchant_phone');
 if (!phone) location.href = '/login.html';
 
 let merchant = null;
-let texts = [];
-let media = [];
 let replies = [];
-const KINDS = ['audio', 'image', 'video'];
 const LIMIT = 4 * 1024 * 1024;
 const KIND_LABEL = { text: 'نص', audio: 'صوت', image: 'صورة', video: 'فيديو' };
+const ACCEPT = { audio: 'audio/*', image: 'image/*', video: 'video/*' };
 
 const $ = id => document.getElementById(id);
 const log = $('log');
@@ -245,33 +213,21 @@ function renderInfo() {
     : 'بدون تاريخ انتهاء';
 }
 
-/* ---------- التبويب 2: الردود ---------- */
-function renderMediaOptions() {
-  const kind = $('reply-kind').value;
-  const sel = $('media-select');
-  sel.innerHTML = '';
-  const list = media.filter(m => m.kind === kind);
-  if (list.length === 0) {
-    const o = document.createElement('option');
-    o.textContent = 'لا توجد ملفات من هذا النوع، ارفعها أولاً';
-    o.value = '';
-    sel.appendChild(o);
-    return;
-  }
-  list.forEach(m => {
-    const o = document.createElement('option');
-    o.value = m.id;
-    o.textContent = m.original_name || m.storage_path;
-    sel.appendChild(o);
-  });
-}
-
+/* ---------- التبويب 2: الإضافة ---------- */
 function toggleReplyInputs() {
-  const isText = $('reply-kind').value === 'text';
+  const kind = $('reply-kind').value;
+  const isText = kind === 'text';
   $('text-box').style.display = isText ? 'block' : 'none';
   $('media-box').style.display = isText ? 'none' : 'block';
-  if (!isText) renderMediaOptions();
+  if (!isText) $('media-file').accept = ACCEPT[kind];
+  $('media-file').value = '';
+  $('file-name').textContent = 'لم يُختر ملف';
 }
+
+$('media-file').addEventListener('change', () => {
+  const f = $('media-file').files[0];
+  $('file-name').textContent = f ? f.name : 'لم يُختر ملف';
+});
 
 function renderReplies() {
   const box = $('list-replies');
@@ -281,10 +237,7 @@ function renderReplies() {
   replies.forEach((r, i) => {
     const row = document.createElement('div');
     row.className = 'item';
-    row.style.flexDirection = 'column';
-    row.style.alignItems = 'stretch';
 
-    // الكلمات في الأعلى
     const kw = document.createElement('div');
     kw.className = 'kw';
     (r.keywords || []).forEach(k => {
@@ -293,12 +246,8 @@ function renderReplies() {
       kw.appendChild(s);
     });
 
-    // الرد تحت الكلمات
     const bottom = document.createElement('div');
-    bottom.style.display = 'flex';
-    bottom.style.alignItems = 'center';
-    bottom.style.gap = '8px';
-    bottom.style.marginTop = '6px';
+    bottom.className = 'row';
 
     const num = document.createElement('span');
     num.className = 'num';
@@ -307,7 +256,7 @@ function renderReplies() {
     const label = document.createElement('span');
     label.className = 'txt';
     label.textContent = KIND_LABEL[r.kind] + ': ' +
-      (r.kind === 'text' ? r.content : (r.media_name || 'ملف مرفق'));
+      (r.kind === 'text' ? r.content : 'ملف مرفق');
 
     const del = document.createElement('button');
     del.className = 'del';
@@ -329,6 +278,38 @@ async function loadReplies() {
   renderReplies();
 }
 
+// رفع الملف وإرجاع معرّفه من جدول media_files
+async function uploadMedia(file, kind) {
+  const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+  let res;
+  try {
+    res = await fetch('/api/upload', {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.type || 'application/octet-stream',
+        'X-Store-Name': encodeURIComponent(merchant.name),
+        'X-Media-Kind': kind,
+        'X-File-Ext': ext,
+        'X-Original-Name': encodeURIComponent(file.name)
+      },
+      body: file
+    });
+  } catch (e) {
+    throw new Error('تعذر الاتصال بالسيرفر');
+  }
+  const text = await res.text();
+  let data = {};
+  try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 200) }; }
+  if (!res.ok) throw new Error(data.error || data.step || ('HTTP ' + res.status));
+
+  // نجلب الملف من القائمة لنحصل على معرّفه
+  const lr = await fetch('/api/media?store=' + encodeURIComponent(merchant.name));
+  const ld = await lr.json().catch(() => ({}));
+  const found = (ld.items || []).find(m => m.storage_path === data.path);
+  if (!found) throw new Error('تعذر العثور على الملف بعد رفعه');
+  return found.id;
+}
+
 async function saveReply() {
   const btn = $('btn-reply');
   const keywords = $('kw-input').value.trim();
@@ -337,18 +318,26 @@ async function saveReply() {
   if (!keywords) return addLine('✗ اكتب كلمة واحدة على الأقل', 'err');
 
   const payload = { store: merchant.name, keywords, kind };
+  const file = $('media-file').files[0];
+
   if (kind === 'text') {
     const content = $('reply-text').value.trim();
     if (!content) return addLine('✗ اكتب نص الرد', 'err');
     payload.content = content;
   } else {
-    const mediaId = $('media-select').value;
-    if (!mediaId) return addLine('✗ ارفع ملفاً من هذا النوع أولاً', 'err');
-    payload.media_id = mediaId;
+    if (!file) return addLine('✗ اختر ملفاً أولاً', 'err');
+    if (file.size > LIMIT) return addLine('✗ الحجم أكبر من 4 ميغابايت', 'err');
   }
 
   btn.disabled = true;
   try {
+    if (kind !== 'text') {
+      const line = addLine('… جاري رفع ' + file.name, 'busy');
+      payload.media_id = await uploadMedia(file, kind);
+      line.className = 'ok';
+      line.textContent = '✓ تم رفع ' + file.name;
+    }
+
     const r = await fetch('/api/replies', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -359,6 +348,8 @@ async function saveReply() {
 
     $('kw-input').value = '';
     $('reply-text').value = '';
+    $('media-file').value = '';
+    $('file-name').textContent = 'لم يُختر ملف';
     await loadReplies();
     addLine('✓ تم حفظ الرد', 'ok');
   } catch (e) {
@@ -391,201 +382,6 @@ async function removeReply(id, btn) {
 $('reply-kind').addEventListener('change', toggleReplyInputs);
 $('btn-reply').addEventListener('click', saveReply);
 
-/* ---------- التبويب 3: النصوص والملفات ---------- */
-function renderTexts() {
-  const box = $('list-text');
-  box.innerHTML = '';
-  if (texts.length === 0) return emptyRow(box, 'لا توجد نصوص بعد');
-
-  texts.forEach((t, i) => {
-    const row = document.createElement('div');
-    row.className = 'item';
-    const num = document.createElement('span');
-    num.className = 'num';
-    num.textContent = (i + 1) + '.';
-    const body = document.createElement('span');
-    body.className = 'txt';
-    body.textContent = t.content;
-    const del = document.createElement('button');
-    del.className = 'del';
-    del.textContent = 'حذف';
-    del.addEventListener('click', () => removeText(t.id, del));
-    row.append(num, body, del);
-    box.appendChild(row);
-  });
-}
-
-async function loadTexts() {
-  try {
-    const r = await fetch('/api/text?store=' + encodeURIComponent(merchant.name));
-    const d = await r.json().catch(() => ({}));
-    texts = Array.isArray(d.items) ? d.items : [];
-  } catch (e) { texts = []; }
-  renderTexts();
-}
-
-async function addText() {
-  const btn = $('btn-text');
-  const box = $('text-input');
-  const content = box.value.trim();
-  if (!content) return addLine('✗ اكتب نصاً قبل الإضافة', 'err');
-
-  btn.disabled = true;
-  try {
-    const r = await fetch('/api/text', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ store: merchant.name, content })
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
-    texts.push(d.item);
-    renderTexts();
-    box.value = '';
-    addLine('✓ تمت إضافة النص', 'ok');
-  } catch (e) {
-    addLine('✗ فشل إضافة النص: ' + e.message, 'err');
-  } finally {
-    btn.disabled = false;
-  }
-}
-
-async function removeText(id, btn) {
-  if (!confirm('حذف هذا النص نهائياً؟')) return;
-  btn.disabled = true;
-  try {
-    const r = await fetch('/api/text', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id })
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
-    texts = texts.filter(t => t.id !== id);
-    renderTexts();
-    addLine('🗑 تم حذف النص', 'ok');
-  } catch (e) {
-    btn.disabled = false;
-    addLine('✗ فشل الحذف: ' + e.message, 'err');
-  }
-}
-
-function renderMedia(kind) {
-  const list = media.filter(m => m.kind === kind);
-  const box = $('list-' + kind);
-  box.innerHTML = '';
-  if (list.length === 0) return emptyRow(box, 'لا توجد ملفات بعد');
-
-  list.forEach((it, i) => {
-    const row = document.createElement('div');
-    row.className = 'item';
-    const num = document.createElement('span');
-    num.className = 'num';
-    num.textContent = (i + 1) + '.';
-    const name = document.createElement('span');
-    name.className = 'fn';
-    name.textContent = it.original_name || it.storage_path;
-    name.title = name.textContent;
-    const del = document.createElement('button');
-    del.className = 'del';
-    del.textContent = 'حذف';
-    del.addEventListener('click', () => removeMedia(it, del));
-    row.append(num, name, del);
-    box.appendChild(row);
-  });
-}
-
-function renderAllMedia() {
-  KINDS.forEach(renderMedia);
-  renderMediaOptions();
-}
-
-async function loadMedia() {
-  try {
-    const r = await fetch('/api/media?store=' + encodeURIComponent(merchant.name));
-    const d = await r.json().catch(() => ({}));
-    media = Array.isArray(d.items) ? d.items : [];
-  } catch (e) { media = []; }
-  renderAllMedia();
-}
-
-async function upload(file, kind) {
-  const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
-  let res;
-  try {
-    res = await fetch('/api/upload', {
-      method: 'POST',
-      headers: {
-        'Content-Type': file.type || 'application/octet-stream',
-        'X-Store-Name': encodeURIComponent(merchant.name),
-        'X-Media-Kind': kind,
-        'X-File-Ext': ext,
-        'X-Original-Name': encodeURIComponent(file.name)
-      },
-      body: file
-    });
-  } catch (e) {
-    throw new Error('تعذر الاتصال بالسيرفر');
-  }
-  const text = await res.text();
-  let data = {};
-  try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 200) }; }
-  if (!res.ok) throw new Error(data.error || data.step || ('HTTP ' + res.status));
-  return data;
-}
-
-async function removeMedia(it, btn) {
-  if (!confirm('حذف "' + (it.original_name || 'الملف') + '" نهائياً؟')) return;
-  btn.disabled = true;
-  try {
-    const r = await fetch('/api/media', {
-      method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: it.id, path: it.storage_path })
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.error || ('HTTP ' + r.status));
-    media = media.filter(m => m.id !== it.id);
-    renderAllMedia();
-    addLine('🗑 تم حذف ' + (it.original_name || 'الملف'), 'ok');
-  } catch (e) {
-    btn.disabled = false;
-    addLine('✗ فشل الحذف: ' + e.message, 'err');
-  }
-}
-
-KINDS.forEach(kind => {
-  const input = $('file-' + kind);
-  input.addEventListener('change', async () => {
-    const files = Array.from(input.files);
-    input.value = '';
-    for (const file of files) {
-      if (file.size > LIMIT) {
-        addLine('✗ ' + file.name + ': الحجم أكبر من 4 ميغابايت', 'err');
-        continue;
-      }
-      const line = addLine('… جاري رفع ' + file.name, 'busy');
-      try {
-        const data = await upload(file, kind);
-        media.push({
-          id: data.id || ('tmp-' + Date.now() + Math.random()),
-          kind,
-          storage_path: data.path,
-          original_name: file.name
-        });
-        renderAllMedia();
-        line.className = 'ok';
-        line.textContent = '✓ ' + file.name;
-      } catch (e) {
-        line.className = 'err';
-        line.textContent = '✗ ' + file.name + ': ' + e.message;
-      }
-    }
-  });
-});
-
-$('btn-text').addEventListener('click', addText);
-
 /* ---------- البداية ---------- */
 async function init() {
   try {
@@ -602,10 +398,7 @@ async function init() {
     addLine('⚠ حسابك موقوف حالياً، تواصل مع الإدارة', 'err');
   }
   toggleReplyInputs();
-  renderTexts();
-  renderAllMedia();
-  renderReplies();
-  await Promise.all([loadTexts(), loadMedia(), loadReplies()]);
+  await loadReplies();
 }
 
 init();
