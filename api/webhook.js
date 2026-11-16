@@ -1,6 +1,6 @@
 const GRAPH = 'https://graph.facebook.com/v21.0';
 const BUCKET = 'media';
-const MAX_BYTES = 4 * 1024 * 1024;
+const MAX_BYTES = 16 * 1024 * 1024;
 const TEXT_MAX = 1000;
 const KEYWORDS_MAX = 20;
 const KEYWORD_LEN_MAX = 60;
@@ -11,9 +11,14 @@ const KIND_AR = { audio: 'صوت', image: 'صورة', video: 'فيديو' };
 
 const EXT_BY_MIME = {
   'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/amr': 'amr', 'audio/aac': 'aac',
-  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp',
-  'video/mp4': 'mp4', 'video/3gpp': '3gp',
+  'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif',
+  'image/heic': 'heic', 'image/heif': 'heif',
+  'video/mp4': 'mp4', 'video/3gpp': '3gp', 'video/quicktime': 'mov', 'video/webm': 'webm',
 };
+
+const IMAGE_EXT = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif'];
+const VIDEO_EXT = ['mp4', 'mov', '3gp', 'webm'];
+const AUDIO_EXT = ['ogg', 'mp3', 'm4a', 'amr', 'aac', 'opus'];
 
 function normalize(text) {
   return String(text || '')
@@ -93,17 +98,12 @@ const MSG = {
     '• أو صورة، أو صوت، أو فيديو\n\n' +
     'لأكثر من ملف أرسلها واحداً تلو الآخر، ثم اكتب *تم*.\n' +
     'للتراجع اكتب *إلغاء*.',
-  replyReceived:
-    '✅ *تم استلام الرد*\n\n' +
-    'الآن اكتب *الكلمات* التي سيرد بها البوت، مثل:\n' +
-    'سلام، مرحبا، السلام عليكم\n\n' +
-    '💡 يمكنك كتابة كل كلمة في سطر مستقل.',
   filesReceived: (count) =>
     '✅ *تم استلام ' + count + ' ملف*\n\n' +
     'الآن اكتب *الكلمات* التي سيرد بها البوت، مثل:\n' +
     'منتج1، منتج جديد\n\n' +
     '💡 يمكنك كتابة كل كلمة في سطر مستقل.',
-  needFileOrText: '📎 أرسل نصاً أو ملفات أولاً، ثم الكلمات.',
+  noFilesYet: '📎 لم ترسل ملفات بعد.\nأرسل *إضافة* ثم الملفات، أو اكتب كلمة الرد.',
   keywordsInvalid: '⚠️ اكتب من 1 إلى ' + KEYWORDS_MAX + ' كلمة، مفصولة بفاصلة أو بسطر.',
   keywordTooLong: '⚠️ إحدى الكلمات طويلة جداً (الحد 60 حرفاً).',
   keywordConflict: (list) =>
@@ -148,15 +148,16 @@ const MSG = {
     'احذف بعضها بكتابة *حذف رقم*، ثم اكتب *تم*.',
   editSaved: (count) => '✅ *تم حفظ التعديلات*\n\nأصبح الرد يحتوي ' + count + ' ملفات.',
   editNoChanges: '✅ *تم الخروج* بدون تغييرات.',
-  editNeedKeyword: '✏️ اختر رقم الرد أولاً، ثم أرسل الملفات.',
   replyLost: '⚠️ تعذر العثور على الرد.\nأعد المحاولة بكتابة *تعديل*.',
   cancelled: '❌ *تم الإلغاء*\n\nاكتب *قائمة* لعرض الخيارات.',
-  unknownMerchant:
+  unknownMerchant: (type) =>
     '🤔 *لم أفهم طلبك*\n\n' +
-    'اكتب *قائمة* لعرض كل الخيارات.',
-  noFilesYet: '📎 لم ترسل ملفات بعد.\nأرسل *إضافة* ثم الملفات، أو اكتب كلمة الرد.',
-  filesStoredInEditKeyword: '✏️ اختر رقم الرد أولاً، ثم أرسل الملفات.',
+    'اكتب *قائمة* لعرض كل الخيارات.' +
+    (type ? '\n\n(نوع الرسالة المستلمة: ' + type + ')' : ''),
+  mediaFailed: (reason) =>
+    '⚠️ *تعذر حفظ الملف*\n\nالسبب: ' + reason + '\n\nجرّب ملفاً أصغر، أو أعد الإرسال.',
   doneNeedEditKeyword: '✏️ اختر رقم الرد أولاً.',
+  filesStoredInEditKeyword: '✏️ اختر رقم الرد أولاً، ثم أرسل الملفات.',
 };
 
 function sbHeaders(key) {
@@ -495,19 +496,23 @@ async function sendMediaReply(cfg, phoneNumberId, to, kind, mediaRow) {
 
 async function storeIncomingMedia(cfg, store, msg, type) {
   const obj = msg[type] || {};
-  if (!obj.id) throw new Error('no media id');
+  if (!obj.id) throw new Error('الرسالة لا تحمل معرّف الملف');
 
   const metaRes = await fetch(`${GRAPH}/${obj.id}`, {
     headers: { Authorization: `Bearer ${cfg.token}` },
   });
   const meta = await metaRes.json();
-  if (!meta.url) throw new Error('no media url');
-  if (meta.file_size && meta.file_size > MAX_BYTES) throw new Error('file too large');
+  if (!meta.url) throw new Error('تعذر الوصول للملف من واتساب');
+  if (meta.file_size && meta.file_size > MAX_BYTES) {
+    throw new Error('الملف أكبر من ' + Math.round(MAX_BYTES / 1024 / 1024) + ' ميغابايت');
+  }
 
   const fileRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${cfg.token}` } });
-  if (!fileRes.ok) throw new Error('media download failed');
+  if (!fileRes.ok) throw new Error('تعذر تحميل الملف');
   const buf = Buffer.from(await fileRes.arrayBuffer());
-  if (buf.length > MAX_BYTES) throw new Error('file too large');
+  if (buf.length > MAX_BYTES) {
+    throw new Error('الملف أكبر من ' + Math.round(MAX_BYTES / 1024 / 1024) + ' ميغابايت');
+  }
 
   const mime = String(obj.mime_type || meta.mime_type || 'application/octet-stream').split(';')[0];
   const ext = EXT_BY_MIME[mime] || 'bin';
@@ -523,7 +528,7 @@ async function storeIncomingMedia(cfg, store, msg, type) {
     },
     body: buf,
   });
-  if (!up.ok) throw new Error('storage upload failed');
+  if (!up.ok) throw new Error('فشل حفظ الملف في التخزين');
 
   const row = await sbInsert(cfg, 'media_files', {
     store_id: store.id,
@@ -555,15 +560,24 @@ async function applyEdit(cfg, phoneNumberId, from, session) {
   return sendText(cfg, phoneNumberId, from, MSG.editSaved(current.length + added.length));
 }
 
+// يحوّل المستندات (document) إلى صورة أو فيديو أو صوت حسب نوعها الحقيقي
+function normalizeIncoming(msg) {
+  if (msg.type !== 'document') return msg;
+  const doc = msg.document || {};
+  const mime = String(doc.mime_type || '').toLowerCase();
+  const name = String(doc.filename || '').toLowerCase();
+  const ext = name.includes('.') ? name.split('.').pop() : '';
+
+  let kind = null;
+  if (mime.startsWith('image/') || IMAGE_EXT.includes(ext)) kind = 'image';
+  else if (mime.startsWith('video/') || VIDEO_EXT.includes(ext)) kind = 'video';
+  else if (mime.startsWith('audio/') || AUDIO_EXT.includes(ext)) kind = 'audio';
+
+  return kind ? { ...msg, type: kind, [kind]: doc } : msg;
+}
+
 async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
-  // واتساب يرسل بعض الصور والفيديو كـ"مستند": نحوّلها إلى نوعها الصحيح
-  if (msg.type === 'document') {
-    const mime = String(msg.document?.mime_type || '');
-    const kind = mime.startsWith('image/') ? 'image'
-      : mime.startsWith('video/') ? 'video'
-      : mime.startsWith('audio/') ? 'audio' : null;
-    if (kind) msg = { ...msg, type: kind, [kind]: msg.document };
-  }
+  msg = normalizeIncoming(msg);
 
   const type = msg.type;
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
@@ -605,8 +619,13 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     if (session.state === 'await_edit_keyword') {
       return sendText(cfg, phoneNumberId, from, MSG.filesStoredInEditKeyword);
     }
-    const mediaId = await storeIncomingMedia(cfg, store, msg, type);
-    await appendPendingMedia(cfg, from, mediaId);
+    try {
+      const mediaId = await storeIncomingMedia(cfg, store, msg, type);
+      await appendPendingMedia(cfg, from, mediaId);
+    } catch (err) {
+      console.error('media error:', err?.message || err);
+      return sendText(cfg, phoneNumberId, from, MSG.mediaFailed(err?.message || 'خطأ غير معروف'));
+    }
     return;
   }
 
@@ -635,7 +654,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   }
 
   if (type !== 'text' || !text) {
-    return sendText(cfg, phoneNumberId, from, MSG.unknownMerchant);
+    return sendText(cfg, phoneNumberId, from, MSG.unknownMerchant(type));
   }
 
   if (session.state === 'await_edit_keyword') {
@@ -701,7 +720,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   const fresh = await getSession(cfg, from);
   const hasPending = Boolean(fresh.pending_text) || (fresh.pending_media_ids || []).length > 0;
   if (!hasPending) {
-    return sendText(cfg, phoneNumberId, from, MSG.unknownMerchant);
+    return sendText(cfg, phoneNumberId, from, MSG.unknownMerchant(''));
   }
 
   const keywords = parseKeywords(text);
