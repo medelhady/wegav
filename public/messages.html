@@ -1,1 +1,180 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>رسائل البوت</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;color:#222}
+.wrap{max-width:720px;margin:0 auto;padding:16px}
+.card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:12px}
+h1{font-size:18px;margin:0 0 4px}
+.sub{font-size:13px;color:#666}
+input[type=password]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-size:15px}
+textarea{width:100%;min-height:110px;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:inherit;font-size:14px;resize:vertical}
+.btn{background:#1a73e8;color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;margin-top:8px}
+.btn.gray{background:#fff;color:#333;border:1px solid #ccc}
+.btn:disabled{opacity:.5;cursor:wait}
+.label{font-weight:700;font-size:15px;margin-bottom:6px}
+.key{font-size:12px;color:#999;direction:ltr;text-align:right}
+.changed{font-size:12px;color:#b06000;margin-top:4px}
+#msg{font-size:13px;margin-top:8px;min-height:18px}
+.ok{color:#188038}.err{color:#d93025}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
 
+  <div class="card" id="login-box">
+    <h1>رسائل البوت</h1>
+    <div class="sub" style="margin-bottom:12px">أدخل كلمة سر الإدارة للمتابعة</div>
+    <input type="password" id="pass" placeholder="كلمة السر">
+    <div style="margin-top:12px;text-align:left">
+      <button class="btn" id="btn-login">دخول</button>
+    </div>
+    <div id="login-msg" class="err" style="margin-top:8px;font-size:13px"></div>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="card">
+      <h1>رسائل البوت</h1>
+      <div class="sub">عدّل النص ثم اضغط حفظ. التغيير يظهر في البوت فوراً.<br>
+      استخدم <b>*نص*</b> لجعل الكلام عريضاً، وسطر جديد لكل فقرة.</div>
+      <div id="msg"></div>
+    </div>
+    <div id="list"></div>
+  </div>
+
+</div>
+
+<script>
+let password = sessionStorage.getItem('admin_pass') || '';
+let items = [];
+const $ = id => document.getElementById(id);
+
+function show(text, cls) {
+  const m = $('msg');
+  m.className = cls || '';
+  m.textContent = text;
+}
+
+async function api(method, body) {
+  const res = await fetch('/api/botmsg', {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': password },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || ('HTTP ' + res.status));
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+function render() {
+  const box = $('list');
+  box.innerHTML = '';
+  items.forEach(it => {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const label = document.createElement('div');
+    label.className = 'label';
+    label.textContent = it.label;
+
+    const key = document.createElement('div');
+    key.className = 'key';
+    key.textContent = it.key;
+
+    const ta = document.createElement('textarea');
+    ta.value = it.value;
+
+    const changed = document.createElement('div');
+    changed.className = 'changed';
+    const refresh = () => {
+      changed.textContent = ta.value.trim() !== it.default_value.trim() ? 'معدّلة عن الأصل' : '';
+    };
+    ta.addEventListener('input', refresh);
+    refresh();
+
+    const save = document.createElement('button');
+    save.className = 'btn';
+    save.textContent = 'حفظ';
+    save.addEventListener('click', async () => {
+      save.disabled = true;
+      try {
+        await api('POST', { key: it.key, value: ta.value });
+        it.value = ta.value.trim();
+        show('✓ تم حفظ: ' + it.label, 'ok');
+        refresh();
+      } catch (e) {
+        show('✗ فشل الحفظ: ' + e.message, 'err');
+      } finally {
+        save.disabled = false;
+      }
+    });
+
+    const restore = document.createElement('button');
+    restore.className = 'btn gray';
+    restore.style.marginRight = '6px';
+    restore.textContent = 'استعادة الأصل';
+    restore.addEventListener('click', async () => {
+      if (!confirm('استعادة النص الأصلي؟')) return;
+      restore.disabled = true;
+      try {
+        await api('POST', { key: it.key, restore: true });
+        await load();
+        show('✓ تمت استعادة: ' + it.label, 'ok');
+      } catch (e) {
+        show('✗ فشل الاستعادة: ' + e.message, 'err');
+        restore.disabled = false;
+      }
+    });
+
+    card.append(label, key, ta, changed, save, restore);
+    box.appendChild(card);
+  });
+}
+
+async function load() {
+  try {
+    const data = await api('GET');
+    items = Array.isArray(data.items) ? data.items : [];
+    render();
+  } catch (e) {
+    if (e.status === 401) {
+      sessionStorage.removeItem('admin_pass');
+      password = '';
+      $('app').classList.add('hidden');
+      $('login-box').classList.remove('hidden');
+      $('login-msg').textContent = 'كلمة السر غير صحيحة';
+      return;
+    }
+    show('✗ تعذر التحميل: ' + e.message, 'err');
+  }
+}
+
+$('btn-login').addEventListener('click', async () => {
+  password = $('pass').value.trim();
+  if (!password) return ($('login-msg').textContent = 'اكتب كلمة السر');
+  sessionStorage.setItem('admin_pass', password);
+  $('login-box').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  await load();
+});
+
+$('pass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('btn-login').click();
+});
+
+if (password) {
+  $('login-box').classList.add('hidden');
+  $('app').classList.remove('hidden');
+  load();
+}
+</script>
+</body>
+</html>
