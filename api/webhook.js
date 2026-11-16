@@ -144,14 +144,22 @@ async function findReplyForText(cfg, storeId, text) {
   return null;
 }
 
-// كل ردود المتجر بترتيب ثابت، لتطابق أرقام القائمة
+// كل ردود المتجر بترتيب ثابت (الأقدم أولاً)، ليطابق الرقم في القائمة دائماً
 async function listStoreReplies(cfg, storeId) {
   const r = await fetch(
-    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords,kind,content,media_id,media_ids&order=created_at.asc`,
+    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords,kind,content,media_id,media_ids,created_at&order=created_at.asc`,
     { headers: sbHeaders(cfg.key) }
   );
   const rows = await r.json();
   return Array.isArray(rows) ? rows : [];
+}
+
+async function deleteReplyById(cfg, id) {
+  const r = await fetch(`${cfg.url}/rest/v1/auto_replies?id=eq.${id}`, {
+    method: 'DELETE',
+    headers: { ...sbHeaders(cfg.key), Prefer: 'return=minimal' },
+  });
+  if (!r.ok) throw new Error('delete failed');
 }
 
 function replyLabel(row) {
@@ -164,7 +172,7 @@ function replyLabel(row) {
   } else {
     kind = KIND_AR[row.kind] || 'ملف';
   }
-  return kw + ' - ' + kind;
+  return kw + '  |  ' + kind;
 }
 
 // يرجع الرد وعناصره بالترتيب، مع المسار ونوع كل ملف
@@ -221,16 +229,25 @@ async function sendText(cfg, phoneNumberId, to, body) {
   if (!r.ok) console.error('send failed', r.status, (await r.text()).slice(0, 200));
 }
 
-// يعرض للتاجر كل ردود المتجر مرقمة، ليختار أحدها
+// قائمة الردود مرتبة: رقم واضح، ثم الكلمات ونوع الرد، ثم تعليمات مختصرة
 async function sendReplyList(cfg, phoneNumberId, from, storeId) {
   const rows = await listStoreReplies(cfg, storeId);
   if (rows.length === 0) {
     await resetSession(cfg, from);
     return sendText(cfg, phoneNumberId, from, 'لا توجد ردود بعد. أرسل "إضافة" لإنشاء رد جديد.');
   }
-  const lines = rows.map((r, i) => (i + 1) + '. ' + replyLabel(r));
-  return sendText(cfg, phoneNumberId, from,
-    'اختر رقم الرد الذي تريد تعديله:\n\n' + lines.join('\n') + '\n\nأو اكتب كلمة الرد مباشرة.');
+
+  const lines = rows.map((r, i) => (i + 1) + ') ' + replyLabel(r));
+  const body =
+    '📋 ردودك (' + rows.length + '):\n' +
+    '────────────\n' +
+    lines.join('\n') +
+    '\n────────────\n' +
+    'اكتب رقم الرد للتعديل عليه\n' +
+    'أو "حذف رقم" لحذف رد (مثال: حذف 2)\n' +
+    'أو "إلغاء" للخروج';
+
+  return sendText(cfg, phoneNumberId, from, body);
 }
 
 // يرسل للتاجر محتوى الرد الفعلي: كل عنصر كما سيصل للزبون، مع رقمه قبله
@@ -465,14 +482,24 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendText(cfg, phoneNumberId, from, 'أرسل "إضافة" لرد جديد، أو "تعديل" لتعديل رد موجود.');
   }
 
-  // بعد "تعديل": رقم من القائمة أو كلمة الرد، ثم نرسل محتواه
+  // قائمة الردود: حذف رد، أو اختيار رد للتعديل بالرقم أو الكلمة
   if (session.state === 'await_edit_keyword') {
-    let row = null;
+    const dm = cmd.match(/^حذف (\d+)$/);
+    if (dm) {
+      const list = await listStoreReplies(cfg, store.id);
+      const target = list[parseInt(dm[1], 10) - 1];
+      if (!target) {
+        return sendText(cfg, phoneNumberId, from, 'رقم غير موجود في القائمة. اختر رقماً صحيحاً.');
+      }
+      await deleteReplyById(cfg, target.id);
+      await sendText(cfg, phoneNumberId, from, '🗑 تم حذف: ' + replyLabel(target));
+      return sendReplyList(cfg, phoneNumberId, from, store.id);
+    }
 
+    let row = null;
     if (/^\d+$/.test(text)) {
       const list = await listStoreReplies(cfg, store.id);
-      const index = parseInt(text, 10) - 1;
-      row = list[index] || null;
+      row = list[parseInt(text, 10) - 1] || null;
       if (!row) {
         return sendText(cfg, phoneNumberId, from,
           'رقم غير موجود. اختر رقماً من القائمة، أو اكتب كلمة الرد، أو "إلغاء".');
