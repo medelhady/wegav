@@ -5,6 +5,7 @@ const TEXT_MAX = 1000;
 const KEYWORDS_MAX = 20;
 const KEYWORD_LEN_MAX = 60;
 const ALBUM_MAX = 10;
+const TRIAL_REPLIES = 50;
 const MEDIA_TYPES = ['audio', 'image', 'video'];
 const KIND_AR = { audio: 'صوت', image: 'صورة', video: 'فيديو' };
 
@@ -35,6 +36,7 @@ const ADD_CMD = normalize('إضافة');
 const EDIT_CMD = normalize('تعديل');
 const CANCEL_CMD = normalize('إلغاء');
 const DONE_CMD = normalize('تم');
+const REGISTER_CMD = normalize('تسجيل');
 
 function sbHeaders(key) {
   return { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json' };
@@ -115,6 +117,34 @@ async function getStoreByCode(cfg, code) {
   return Array.isArray(rows) && rows[0] ? rows[0] : null;
 }
 
+// يولّد كود من 3 أرقام غير مستخدم
+async function generateMerchantCode(cfg) {
+  for (let i = 0; i < 30; i++) {
+    const code = String(100 + Math.floor(Math.random() * 900));
+    const r = await fetch(
+      `${cfg.url}/rest/v1/stores?merchant_code=eq.${code}&select=id`,
+      { headers: sbHeaders(cfg.key) }
+    );
+    const rows = await r.json();
+    if (Array.isArray(rows) && rows.length === 0) return code;
+  }
+  throw new Error('no free merchant code');
+}
+
+// ينشئ المتجر للرقم الجديد بالتجربة المجانية
+async function createStore(cfg, phone, name) {
+  const code = await generateMerchantCode(cfg);
+  return sbInsert(cfg, 'stores', {
+    name,
+    phone,
+    merchant_code: code,
+    status: 'active',
+    plan: 'trial',
+    replies_quota: TRIAL_REPLIES,
+    replies_used: 0,
+  });
+}
+
 async function findConflicts(cfg, storeId, keywords) {
   const r = await fetch(
     `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=keywords`,
@@ -144,7 +174,6 @@ async function findReplyForText(cfg, storeId, text) {
   return null;
 }
 
-// كل ردود المتجر بترتيب ثابت (الأقدم أولاً)، ليطابق الرقم في القائمة دائماً
 async function listStoreReplies(cfg, storeId) {
   const r = await fetch(
     `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords,kind,content,media_id,media_ids,created_at&order=created_at.asc`,
@@ -175,7 +204,6 @@ function replyLabel(row) {
   return kw + '  |  ' + kind;
 }
 
-// يرجع الرد وعناصره بالترتيب، مع المسار ونوع كل ملف
 async function getReplyItems(cfg, replyId) {
   const r = await fetch(
     `${cfg.url}/rest/v1/auto_replies?id=eq.${replyId}&select=id,kind,media_id,media_ids`,
@@ -229,7 +257,6 @@ async function sendText(cfg, phoneNumberId, to, body) {
   if (!r.ok) console.error('send failed', r.status, (await r.text()).slice(0, 200));
 }
 
-// قائمة الردود مرتبة: رقم واضح، ثم الكلمات ونوع الرد، ثم تعليمات مختصرة
 async function sendReplyList(cfg, phoneNumberId, from, storeId) {
   const rows = await listStoreReplies(cfg, storeId);
   if (rows.length === 0) {
@@ -250,7 +277,6 @@ async function sendReplyList(cfg, phoneNumberId, from, storeId) {
   return sendText(cfg, phoneNumberId, from, body);
 }
 
-// يرسل للتاجر محتوى الرد الفعلي: كل عنصر كما سيصل للزبون، مع رقمه قبله
 async function sendEditMenu(cfg, phoneNumberId, from, replyId) {
   const data = await getReplyItems(cfg, replyId);
   if (!data) {
@@ -393,7 +419,6 @@ async function storeIncomingMedia(cfg, store, msg, type) {
   return row.id;
 }
 
-// إضافة الملفات الجديدة المعلّقة إلى الرد الذي يتم تعديله
 async function applyEdit(cfg, phoneNumberId, from, session) {
   const data = await getReplyItems(cfg, session.edit_reply_id);
   if (!data) {
@@ -443,7 +468,6 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendReplyList(cfg, phoneNumberId, from, store.id);
   }
 
-  // أي ملف يُحفظ بصمت في الانتظار
   if (isMedia) {
     if (session.state === 'await_edit_keyword') {
       return sendText(cfg, phoneNumberId, from, 'اختر رقم الرد أولاً، ثم أرسل الملفات.');
@@ -482,7 +506,6 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendText(cfg, phoneNumberId, from, 'أرسل "إضافة" لرد جديد، أو "تعديل" لتعديل رد موجود.');
   }
 
-  // قائمة الردود: حذف رد، أو اختيار رد للتعديل بالرقم أو الكلمة
   if (session.state === 'await_edit_keyword') {
     const dm = cmd.match(/^حذف (\d+)$/);
     if (dm) {
@@ -528,7 +551,6 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendEditMenu(cfg, phoneNumberId, from, row.id);
   }
 
-  // أثناء التعديل: حذف عنصر برقمه، أو تنبيه
   if (session.state === 'await_edit_media') {
     const m = cmd.match(/^حذف (\d+)$/);
     if (m) {
@@ -549,7 +571,6 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       'تم استلام النص. اكتب الكلمات التي سيرد بها، مفصولة بفاصلة أو بسطر لكل كلمة.');
   }
 
-  // أي نص آخر بعد الملفات أو النص: هذه هي الكلمات
   const fresh = await getSession(cfg, from);
   const hasPending = Boolean(fresh.pending_text) || (fresh.pending_media_ids || []).length > 0;
   if (!hasPending) {
@@ -591,9 +612,37 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   return sendText(cfg, phoneNumberId, from, '✓ تم حفظ الرد. الكلمات: ' + keywords.join('، '));
 }
 
+// التاجر الجديد: يكتب "تسجيل" ثم اسم المتجر
+async function handleRegistration(cfg, phoneNumberId, from, msg, session) {
+  const type = msg.type;
+  const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
+
+  if (session.state === 'await_store_name') {
+    if (!text || text.length < 2 || text.length > 60) {
+      return sendText(cfg, phoneNumberId, from, 'اكتب اسم متجرك (من 2 إلى 60 حرفاً).');
+    }
+    const store = await createStore(cfg, from, text);
+    await resetSession(cfg, from);
+    return sendText(cfg, phoneNumberId, from,
+      '🎉 تم تسجيل متجرك: ' + store.name + '\n' +
+      'كودك: ' + store.merchant_code + '\n' +
+      'تجربتك المجانية: ' + TRIAL_REPLIES + ' رداً.\n\n' +
+      'الآن أرسل "إضافة" لإضافة ردودك (نص أو صوت أو صورة أو فيديو).');
+  }
+
+  return null;
+}
+
 async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
   const type = msg.type;
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
+  const cmd = normalize(text);
+
+  if (cmd === REGISTER_CMD) {
+    await setSession(cfg, from, { state: 'await_store_name' });
+    return sendText(cfg, phoneNumberId, from,
+      'مرحباً بك! سجّل متجرك الآن. اكتب اسم متجرك.');
+  }
 
   if (/^\d{3}$/.test(text)) {
     const store = await getStoreByCode(cfg, text);
@@ -618,7 +667,8 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendText(cfg, phoneNumberId, from, 'لم أفهم طلبك. اكتب كلمة مثل: سلام، أو أرسل كود المتجر للتغيير.');
   }
 
-  return sendText(cfg, phoneNumberId, from, 'مرحباً، أرسل كود المتجر المكون من 3 أرقام للحصول على الردود.');
+  return sendText(cfg, phoneNumberId, from,
+    'مرحباً، أرسل كود المتجر المكون من 3 أرقام للحصول على الردود، أو اكتب "تسجيل" لتسجيل متجرك.');
 }
 
 async function handleMessage(cfg, phoneNumberId, msg) {
@@ -628,6 +678,11 @@ async function handleMessage(cfg, phoneNumberId, msg) {
   const store = await getStoreByPhone(cfg, from);
   if (store) {
     return handleMerchant(cfg, phoneNumberId, from, store, msg, session);
+  }
+
+  // رقم غير مسجل: إن كان ينتظر اسم المتجر نعالجه، وإلا نعامله كزبون
+  if (session.state === 'await_store_name') {
+    return handleRegistration(cfg, phoneNumberId, from, msg, session);
   }
   return handleCustomer(cfg, phoneNumberId, from, msg, session);
 }
