@@ -258,25 +258,25 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       state: 'await_reply', keywords: [], pending_text: null, pending_media_id: null, pending_media_ids: [],
     });
     return sendText(cfg, phoneNumberId, from,
-      'أرسل الرد الآن: نص، أو صوت، أو صورة، أو فيديو. ولأكثر من صورة أرسلها واحدة تلو الأخرى، ثم اكتب "تم".');
+      'أرسل الرد الآن: نص، أو صوت، أو صورة، أو فيديو. ولأكثر من ملف أرسلها واحداً تلو الآخر، ثم اكتب "تم".');
   }
 
-  // التاجر يرسل ملفات متعددة (صور/صوت/فيديو)
-  if (isMedia && (session.state === 'await_reply' || session.state === 'await_keywords' || session.state === 'collecting')) {
+  // استلام الملفات بصمت: بدون رد على كل ملف
+  if (isMedia && (session.state === 'await_reply' || session.state === 'await_keywords')) {
     const mediaId = await storeIncomingMedia(cfg, store, msg, type);
     await appendPendingMedia(cfg, from, mediaId);
-    const fresh = await getSession(cfg, from);
-    const count = (fresh.pending_media_ids || []).length;
-    return sendText(cfg, phoneNumberId, from,
-      'تم استلام ' + count + ' ملف. أرسل المزيد، ثم اكتب "تم" عند الانتهاء، أو اكتب الكلمات مباشرة.');
+    return;
   }
 
+  // التاجر أنهى إرسال الملفات: نعرض العدد مرة واحدة
   if (cmd === DONE_CMD) {
     const fresh = await getSession(cfg, from);
-    if ((fresh.pending_media_ids || []).length === 0) {
+    const count = (fresh.pending_media_ids || []).length;
+    if (count === 0) {
       return sendText(cfg, phoneNumberId, from, 'لم ترسل ملفات بعد.');
     }
-    return sendText(cfg, phoneNumberId, from, 'اكتب الكلمات التي سيرد بها، مفصولة بفاصلة أو بسطر لكل كلمة.');
+    return sendText(cfg, phoneNumberId, from,
+      'تم استلام ' + count + ' ملف. اكتب الكلمات التي سيرد بها، مفصولة بفاصلة أو بسطر لكل كلمة.');
   }
 
   if (session.state === 'await_reply' && type === 'text' && text) {
