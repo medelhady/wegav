@@ -7,6 +7,7 @@ const KEYWORD_LEN_MAX = 60;
 const ALBUM_MAX = 10;
 const TRIAL_REPLIES = 50;
 const MEDIA_TYPES = ['audio', 'image', 'video'];
+const IGNORED_TYPES = ['unsupported', 'reaction', 'sticker', 'system', 'unknown', 'order', 'contacts', 'location', 'interactive', 'button'];
 const KIND_AR = { audio: 'صوت', image: 'صورة', video: 'فيديو' };
 
 const EXT_BY_MIME = {
@@ -153,11 +154,12 @@ const MSG = {
   unknownMerchant: (type) =>
     '🤔 *لم أفهم طلبك*\n\n' +
     'اكتب *قائمة* لعرض كل الخيارات.' +
-    (type ? '\n\n(نوع الرسالة المستلمة: ' + type + ')' : ''),
+    (type ? '\n\n(نوع الرسالة: ' + type + ')' : ''),
   mediaFailed: (reason) =>
     '⚠️ *تعذر حفظ الملف*\n\nالسبب: ' + reason + '\n\nجرّب ملفاً أصغر، أو أعد الإرسال.',
   doneNeedEditKeyword: '✏️ اختر رقم الرد أولاً.',
   filesStoredInEditKeyword: '✏️ اختر رقم الرد أولاً، ثم أرسل الملفات.',
+  editIndexInvalidGeneric: '⚠️ رقم غير صحيح.',
 };
 
 function sbHeaders(key) {
@@ -577,6 +579,9 @@ function normalizeIncoming(msg) {
 }
 
 async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
+  // رسائل غير مدعومة أو تفاعلات أو ملصقات: نتجاهلها بصمت
+  if (IGNORED_TYPES.includes(msg.type)) return;
+
   msg = normalizeIncoming(msg);
 
   const type = msg.type;
@@ -771,6 +776,8 @@ async function handleRegistration(cfg, phoneNumberId, from, msg) {
 }
 
 async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
+  if (IGNORED_TYPES.includes(msg.type)) return;
+
   const type = msg.type;
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
   const cmd = normalize(text);
