@@ -10,17 +10,18 @@ body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;color:#222}
 .card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:12px}
 h1{font-size:18px;margin:0 0 4px}
 .sub{font-size:13px;color:#666}
-input[type=password]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-size:15px}
+input[type=password],input[type=text]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-size:15px}
 .btn{background:#1a73e8;color:#fff;border:0;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13px;font-weight:600;margin:2px}
 .btn.gray{background:#fff;color:#333;border:1px solid #ccc}
 .btn.red{background:#fff;color:#d93025;border:1px solid #f1b3ad}
 .btn.green{background:#188038}
+.btn.danger{background:#d93025}
 .btn:disabled{opacity:.5;cursor:wait}
 .store{border-bottom:1px dashed #eee;padding:12px 0}
 .store:last-child{border-bottom:0}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .name{font-weight:700;font-size:15px}
-.meta{font-size:13px;color:#555;margin-top:4px;line-height:1.7}
+.meta{font-size:13px;color:#555;margin-top:4px;line-height:1.7;white-space:pre-line}
 .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700}
 .b-active{background:#e6f4ea;color:#188038}
 .b-paused{background:#fef7e0;color:#b06000}
@@ -29,7 +30,9 @@ input[type=password]{width:100%;padding:10px;border:1px solid #ccc;border-radius
 .stat{flex:1;min-width:120px;background:#fff;border-radius:10px;padding:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
 .stat .k{font-size:12px;color:#777}
 .stat .v{font-size:20px;font-weight:700;margin-top:4px}
-#msg{font-size:13px;margin-top:8px;min-height:18px}
+.danger-box{background:#fff5f5;border:1px solid #f1b3ad;border-radius:8px;padding:10px;margin-top:8px}
+.danger-box .hint{font-size:12px;color:#a50e0e;margin-bottom:6px}
+#msg{font-size:13px;margin-top:8px;min-height:18px;white-space:pre-line}
 .ok{color:#188038}.err{color:#d93025}
 .hidden{display:none}
 </style>
@@ -37,7 +40,6 @@ input[type=password]{width:100%;padding:10px;border:1px solid #ccc;border-radius
 <body>
 <div class="wrap">
 
-  <!-- شاشة الدخول -->
   <div class="card" id="login-box">
     <h1>لوحة الإدارة</h1>
     <div class="sub" style="margin-bottom:12px">أدخل كلمة السر للمتابعة</div>
@@ -48,7 +50,6 @@ input[type=password]{width:100%;padding:10px;border:1px solid #ccc;border-radius
     <div id="login-msg" class="err" style="margin-top:8px;font-size:13px"></div>
   </div>
 
-  <!-- لوحة الإدارة -->
   <div id="app" class="hidden">
     <div class="card row">
       <div>
@@ -79,9 +80,7 @@ input[type=password]{width:100%;padding:10px;border:1px solid #ccc;border-radius
 <script>
 let password = sessionStorage.getItem('admin_pass') || '';
 let stores = [];
-
 const $ = id => document.getElementById(id);
-
 const STATUS_LABEL = { active: 'فعّال', paused: 'متوقف مؤقتاً', suspended: 'موقوف' };
 
 function show(text, cls) {
@@ -149,7 +148,6 @@ function renderList() {
       'الخطة: ' + (s.plan === 'paid' ? 'مدفوعة' : 'تجريبية') + ' | ' +
       'الردود: ' + s.replies_used + ' من ' + s.replies_quota + ' | ' +
       'الانتهاء: ' + fmtDate(s.plan_expires_at);
-    meta.style.whiteSpace = 'pre-line';
     info.appendChild(meta);
 
     top.appendChild(info);
@@ -164,6 +162,7 @@ function renderList() {
       b.textContent = label;
       b.addEventListener('click', () => fn(b));
       actions.appendChild(b);
+      return b;
     };
 
     addBtn('تفعيل', 'green', b => act(s.id, 'activate', {}, b));
@@ -171,10 +170,53 @@ function renderList() {
     addBtn('إيقاف كامل', 'red', b => act(s.id, 'suspend', {}, b));
     addBtn('اشتراك شهري (500 رد)', '', b => act(s.id, 'paid', { quota: 500, months: 1 }, b));
     addBtn('تصفير الردود', 'gray', b => act(s.id, 'reset', {}, b));
+    addBtn('حذف الحساب', 'danger', () => toggleDelete(row, s));
 
     row.appendChild(actions);
     box.appendChild(row);
   });
+}
+
+// صندوق الحذف: يطلب كتابة اسم المتجر بالضبط قبل التنفيذ
+function toggleDelete(row, s) {
+  const existing = row.querySelector('.danger-box');
+  if (existing) { existing.remove(); return; }
+
+  const box = document.createElement('div');
+  box.className = 'danger-box';
+
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  hint.textContent =
+    'تحذير: سيُحذف كل شيء نهائياً (الردود، الملفات، النصوص، الجلسة). ' +
+    'للتأكيد اكتب اسم المتجر بالضبط: ' + s.name;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.placeholder = 'اكتب اسم المتجر';
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.className = 'btn danger';
+  confirmBtn.textContent = 'حذف نهائياً';
+  confirmBtn.style.marginTop = '8px';
+  confirmBtn.addEventListener('click', async () => {
+    if (input.value.trim() !== s.name) {
+      return show('✗ الاسم غير مطابق، لم يُحذف شيء', 'err');
+    }
+    confirmBtn.disabled = true;
+    try {
+      await api('POST', { id: s.id, action: 'delete', confirm_name: input.value.trim() });
+      show('🗑 تم حذف حساب ' + s.name + ' نهائياً', 'ok');
+      await load();
+    } catch (e) {
+      show('✗ فشل الحذف: ' + e.message, 'err');
+      confirmBtn.disabled = false;
+    }
+  });
+
+  box.append(hint, input, confirmBtn);
+  row.appendChild(box);
+  input.focus();
 }
 
 async function act(id, action, extra, btn) {
@@ -228,7 +270,6 @@ $('btn-login').addEventListener('click', async () => {
   sessionStorage.setItem('admin_pass', password);
   showApp();
   await load();
-  if (!stores.length && $('msg').classList.contains('err')) return;
 });
 
 $('pass').addEventListener('keydown', e => {
