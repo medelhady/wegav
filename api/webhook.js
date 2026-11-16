@@ -38,7 +38,9 @@ function parseKeywords(text) {
   return [...new Set(list)];
 }
 
-const ADD_CMD = normalize('إضافة');
+// يقبل كل صيغ كلمة "إضافة" وأخطاءها الشائعة: إضافة، إضافه، اضافة، اضافه، أضافة، اضف
+const ADD_RE = /^ا?ض ?ا?ف ?ه?$/;
+
 const EDIT_CMD = normalize('تعديل');
 const CANCEL_CMD = normalize('إلغاء');
 const DONE_CMD = normalize('تم');
@@ -159,7 +161,6 @@ const MSG = {
     '⚠️ *تعذر حفظ الملف*\n\nالسبب: ' + reason + '\n\nجرّب ملفاً أصغر، أو أعد الإرسال.',
   doneNeedEditKeyword: '✏️ اختر رقم الرد أولاً.',
   filesStoredInEditKeyword: '✏️ اختر رقم الرد أولاً، ثم أرسل الملفات.',
-  editIndexInvalidGeneric: '⚠️ رقم غير صحيح.',
 };
 
 function sbHeaders(key) {
@@ -562,7 +563,6 @@ async function applyEdit(cfg, phoneNumberId, from, session) {
   return sendText(cfg, phoneNumberId, from, MSG.editSaved(current.length + added.length));
 }
 
-// يحوّل المستندات (document) إلى صورة أو فيديو أو صوت حسب نوعها الحقيقي
 function normalizeIncoming(msg) {
   if (msg.type !== 'document') return msg;
   const doc = msg.document || {};
@@ -579,7 +579,6 @@ function normalizeIncoming(msg) {
 }
 
 async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
-  // رسائل غير مدعومة أو تفاعلات أو ملصقات: نتجاهلها بصمت
   if (IGNORED_TYPES.includes(msg.type)) return;
 
   msg = normalizeIncoming(msg);
@@ -587,6 +586,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   const type = msg.type;
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
   const cmd = normalize(text);
+  const cmdNoSpace = cmd.replace(/\s/g, '');
   const isMedia = MEDIA_TYPES.includes(type);
 
   if (store.status !== 'active') {
@@ -609,7 +609,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       MSG.quota(store.replies_used || 0, store.replies_quota || 0));
   }
 
-  if (cmd === ADD_CMD) {
+  if (ADD_RE.test(cmdNoSpace)) {
     await resetSession(cfg, from, 'await_reply');
     return sendText(cfg, phoneNumberId, from, MSG.addStart);
   }
