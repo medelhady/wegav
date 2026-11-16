@@ -109,7 +109,6 @@ input[type=file]{display:none}
         <option value="audio">صوت</option>
         <option value="image">صورة</option>
         <option value="video">فيديو</option>
-        <option value="album">ألبوم صور (عدة صور كرد واحد)</option>
       </select>
 
       <div id="text-box" style="margin-top:12px">
@@ -117,17 +116,12 @@ input[type=file]{display:none}
       </div>
 
       <div id="media-box" style="margin-top:12px;display:none">
-        <label class="btn file" for="media-file">اختر الملف</label>
-        <input type="file" id="media-file">
-        <div class="file-name" id="file-name">لم يُختر ملف</div>
-        <div class="hint">الحد الأقصى 4 ميغابايت</div>
-      </div>
-
-      <div id="album-box" style="margin-top:12px;display:none">
-        <label class="btn file" for="album-files">اختر الصور (حتى 10)</label>
-        <input type="file" id="album-files" accept="image/*" multiple>
-        <div class="file-name" id="album-name">لم تُختر صور</div>
-        <div class="hint">ستُرسل الصور للزبون بالترتيب الذي تختاره هنا</div>
+        <label class="btn file" for="media-files">اختر ملفاً أو أكثر</label>
+        <input type="file" id="media-files" multiple>
+        <div class="file-name" id="file-name">لم تُختر ملفات</div>
+        <div class="hint" id="media-hint">
+          ملف واحد يُحفظ كرد عادي. أكثر من ملف يُحفظ كرد واحد يُرسل بالترتيب (حتى 10 ملفات، والحد 4 ميغابايت لكل ملف).
+        </div>
       </div>
 
       <div style="text-align:left;margin-top:12px">
@@ -226,31 +220,28 @@ function renderInfo() {
 function toggleReplyInputs() {
   const kind = $('reply-kind').value;
   const isText = kind === 'text';
-  const isAlbum = kind === 'album';
   $('text-box').style.display = isText ? 'block' : 'none';
-  $('media-box').style.display = (!isText && !isAlbum) ? 'block' : 'none';
-  $('album-box').style.display = isAlbum ? 'block' : 'none';
-  if (!isText && !isAlbum) $('media-file').accept = ACCEPT[kind];
-  $('media-file').value = '';
-  $('file-name').textContent = 'لم يُختر ملف';
-  $('album-files').value = '';
-  $('album-name').textContent = 'لم تُختر صور';
+  $('media-box').style.display = isText ? 'none' : 'block';
+  if (!isText) $('media-files').accept = ACCEPT[kind];
+  $('media-files').value = '';
+  $('file-name').textContent = 'لم تُختر ملفات';
 }
 
-$('media-file').addEventListener('change', () => {
-  const f = $('media-file').files[0];
-  $('file-name').textContent = f ? f.name : 'لم يُختر ملف';
-});
-
-$('album-files').addEventListener('change', () => {
-  const files = Array.from($('album-files').files);
+$('media-files').addEventListener('change', () => {
+  const files = Array.from($('media-files').files);
   if (files.length > ALBUM_MAX) {
-    addLine('✗ الحد الأقصى ' + ALBUM_MAX + ' صور', 'err');
-    $('album-files').value = '';
-    $('album-name').textContent = 'لم تُختر صور';
+    addLine('✗ الحد الأقصى ' + ALBUM_MAX + ' ملفات في الرد الواحد', 'err');
+    $('media-files').value = '';
+    $('file-name').textContent = 'لم تُختر ملفات';
     return;
   }
-  $('album-name').textContent = files.length ? files.length + ' صورة مختارة' : 'لم تُختر صور';
+  if (files.length === 0) {
+    $('file-name').textContent = 'لم تُختر ملفات';
+  } else if (files.length === 1) {
+    $('file-name').textContent = files[0].name;
+  } else {
+    $('file-name').textContent = files.length + ' ملفات مختارة';
+  }
 });
 
 function renderReplies() {
@@ -282,7 +273,7 @@ function renderReplies() {
     if (r.kind === 'text') {
       label.textContent = 'نص: ' + r.content;
     } else if (r.kind === 'album') {
-      label.textContent = 'ألبوم: ' + (r.media_ids || []).length + ' صورة';
+      label.textContent = 'ألبوم: ' + (r.media_ids || []).length + ' ملفات';
     } else {
       label.textContent = (KIND_LABEL[r.kind] || r.kind) + ': ملف مرفق';
     }
@@ -307,6 +298,7 @@ async function loadReplies() {
   renderReplies();
 }
 
+// رفع ملف واحد وإرجاع معرّفه من جدول media_files
 async function uploadMedia(file, kind) {
   const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
   let res;
@@ -345,42 +337,37 @@ async function saveReply() {
   if (!keywords) return addLine('✗ اكتب كلمة واحدة على الأقل', 'err');
 
   const payload = { store: merchant.name, keywords, kind };
+  const files = Array.from($('media-files').files);
 
   if (kind === 'text') {
     const content = $('reply-text').value.trim();
     if (!content) return addLine('✗ اكتب نص الرد', 'err');
     payload.content = content;
-  } else if (kind === 'album') {
-    const files = Array.from($('album-files').files);
-    if (files.length === 0) return addLine('✗ اختر صوراً للألبوم', 'err');
-    if (files.length > ALBUM_MAX) return addLine('✗ الحد الأقصى ' + ALBUM_MAX + ' صور', 'err');
+  } else {
+    if (files.length === 0) return addLine('✗ اختر ملفاً أولاً', 'err');
+    if (files.length > ALBUM_MAX) return addLine('✗ الحد الأقصى ' + ALBUM_MAX + ' ملفات', 'err');
     for (const f of files) {
       if (f.size > LIMIT) return addLine('✗ ' + f.name + ': الحجم أكبر من 4 ميغابايت', 'err');
     }
-  } else {
-    const file = $('media-file').files[0];
-    if (!file) return addLine('✗ اختر ملفاً أولاً', 'err');
-    if (file.size > LIMIT) return addLine('✗ الحجم أكبر من 4 ميغابايت', 'err');
   }
 
   btn.disabled = true;
   try {
-    if (kind === 'album') {
-      const files = Array.from($('album-files').files);
+    if (kind !== 'text') {
       const ids = [];
       for (const f of files) {
         const line = addLine('… جاري رفع ' + f.name, 'busy');
-        ids.push(await uploadMedia(f, 'image'));
+        ids.push(await uploadMedia(f, kind));
         line.className = 'ok';
         line.textContent = '✓ ' + f.name;
       }
-      payload.media_ids = ids;
-    } else if (kind !== 'text') {
-      const file = $('media-file').files[0];
-      const line = addLine('… جاري رفع ' + file.name, 'busy');
-      payload.media_id = await uploadMedia(file, kind);
-      line.className = 'ok';
-      line.textContent = '✓ تم رفع ' + file.name;
+
+      if (ids.length === 1) {
+        payload.media_id = ids[0];
+      } else {
+        payload.kind = 'album';
+        payload.media_ids = ids;
+      }
     }
 
     const r = await fetch('/api/replies', {
@@ -393,10 +380,8 @@ async function saveReply() {
 
     $('kw-input').value = '';
     $('reply-text').value = '';
-    $('media-file').value = '';
-    $('file-name').textContent = 'لم يُختر ملف';
-    $('album-files').value = '';
-    $('album-name').textContent = 'لم تُختر صور';
+    $('media-files').value = '';
+    $('file-name').textContent = 'لم تُختر ملفات';
     await loadReplies();
     addLine('✓ تم حفظ الرد', 'ok');
   } catch (e) {
