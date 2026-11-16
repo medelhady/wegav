@@ -6,6 +6,7 @@ const KEYWORDS_MAX = 20;
 const KEYWORD_LEN_MAX = 60;
 const ALBUM_MAX = 10;
 const MEDIA_TYPES = ['audio', 'image', 'video'];
+const KIND_AR = { audio: 'صوت', image: 'صورة', video: 'فيديو' };
 
 const EXT_BY_MIME = {
   'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/amr': 'amr', 'audio/aac': 'aac',
@@ -143,6 +144,46 @@ async function findReplyForText(cfg, storeId, text) {
   return null;
 }
 
+// يرجع الرد وعناصره بالترتيب مع اسم كل ملف
+async function getReplyItems(cfg, replyId) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/auto_replies?id=eq.${replyId}&select=id,kind,media_id,media_ids`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const rows = await r.json();
+  const reply = Array.isArray(rows) ? rows[0] : null;
+  if (!reply) return null;
+
+  const ids = reply.kind === 'album'
+    ? (reply.media_ids || [])
+    : (reply.media_id ? [reply.media_id] : []);
+
+  let byId = new Map();
+  if (ids.length > 0) {
+    const mr = await fetch(
+      `${cfg.url}/rest/v1/media_files?id=in.(${ids.join(',')})&select=id,kind,original_name`,
+      { headers: sbHeaders(cfg.key) }
+    );
+    const mf = await mr.json();
+    byId = new Map((Array.isArray(mf) ? mf : []).map(f => [f.id, f]));
+  }
+
+  const items = ids.map(id => {
+    const f = byId.get(id) || {};
+    return { id, kind: f.kind || 'image', original_name: f.original_name || 'ملف' };
+  });
+  return { reply, items };
+}
+
+async function saveReplyIds(cfg, replyId, ids) {
+  const pr = await fetch(`${cfg.url}/rest/v1/auto_replies?id=eq.${replyId}`, {
+    method: 'PATCH',
+    headers: { ...sbHeaders(cfg.key), Prefer: 'return=minimal' },
+    body: JSON.stringify({ kind: 'album', media_id: null, media_ids: ids }),
+  });
+  if (!pr.ok) throw new Error('edit failed');
+}
+
 async function sendText(cfg, phoneNumberId, to, body) {
   const r = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
     method: 'POST',
@@ -152,28 +193,44 @@ async function sendText(cfg, phoneNumberId, to, body) {
   if (!r.ok) console.error('send failed', r.status, (await r.text()).slice(0, 200));
 }
 
-async function sendMediaReply(cfg, phoneNumberId, to, kind, mediaRow) {
-  const sr = await fetch(
-    `${cfg.url}/storage/v1/object/sign/${BUCKET}/${encodeURI(mediaRow.storage_path)}`,
-    {
-      method: 'POST',
-      headers: sbHeaders(cfg.key),
-      body: JSON.stringify({ expiresIn: 300 }),
-    }
-  );
-  const sd = await sr.json();
-  if (!sr.ok || !sd.signedURL) {
-    console.error('sign failed', JSON.stringify(sd).slice(0, 200));
-    return;
+// عرض محتوى الرد الحالي للتاجر بأرقام، ليحذف أو يضيف
+async function sendEditMenu(cfg, phoneNumberId, from, replyId) {
+  const data = await getReplyItems(cfg, replyId);
+  if (!data) {
+    await resetSession(cfg, from);
+    return sendText(cfg, phoneNumberId, from, 'تعذر العثور على الرد. أعد المحاولة بكتابة "تعديل".');
   }
-  const link = `${cfg.url}/storage/v1${sd.signedURL}`;
-  const type = kind === 'audio' ? 'audio' : kind === 'image' ? 'image' : 'video';
-  const r = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to, type, [type]: { link } }),
-  });
-  if (!r.ok) console.error('media send failed', r.status, (await r.text()).slice(0, 200));
+
+  const lines = data.items.map((it, i) =>
+    (i + 1) + '. ' + (KIND_AR[it.kind] || 'ملف') + ': ' + it.original_name
+  );
+  const head = lines.length > 0
+    ? 'محتوى الرد الحالي:\n' + lines.join('\n')
+    : 'هذا الرد لا يحتوي ملفات حالياً.';
+
+  return sendText(cfg, phoneNumberId, from,
+    head + '\n\nأرسل ملفات لإضافتها، أو اكتب "حذف 2" مثلاً لحذف عنصر، ثم اكتب "تم" للحفظ.');
+}
+
+async function removeEditItem(cfg, phoneNumberId, from, session, index) {
+  const data = await getReplyItems(cfg, session.edit_reply_id);
+  if (!data) {
+    await resetSession(cfg, from);
+    return sendText(cfg, phoneNumberId, from, 'تعذر العثور على الرد. أعد المحاولة بكتابة "تعديل".');
+  }
+
+  const items = data.items;
+  if (index < 1 || index > items.length) {
+    return sendText(cfg, phoneNumberId, from, 'رقم غير صحيح. اختر رقماً من 1 إلى ' + items.length + '.');
+  }
+  if (items.length === 1) {
+    return sendText(cfg, phoneNumberId, from,
+      'لا يمكن حذف آخر ملف في الرد. أضف ملفاً جديداً أولاً، ثم احذف هذا.');
+  }
+
+  const ids = items.filter((_, i) => i !== index - 1).map(it => it.id);
+  await saveReplyIds(cfg, session.edit_reply_id, ids);
+  return sendEditMenu(cfg, phoneNumberId, from, session.edit_reply_id);
 }
 
 async function sendReply(cfg, phoneNumberId, to, row) {
@@ -203,6 +260,30 @@ async function sendReply(cfg, phoneNumberId, to, row) {
   const [mf] = await mr.json();
   if (!mf) return;
   return sendMediaReply(cfg, phoneNumberId, to, mf.kind, mf);
+}
+
+async function sendMediaReply(cfg, phoneNumberId, to, kind, mediaRow) {
+  const sr = await fetch(
+    `${cfg.url}/storage/v1/object/sign/${BUCKET}/${encodeURI(mediaRow.storage_path)}`,
+    {
+      method: 'POST',
+      headers: sbHeaders(cfg.key),
+      body: JSON.stringify({ expiresIn: 300 }),
+    }
+  );
+  const sd = await sr.json();
+  if (!sr.ok || !sd.signedURL) {
+    console.error('sign failed', JSON.stringify(sd).slice(0, 200));
+    return;
+  }
+  const link = `${cfg.url}/storage/v1${sd.signedURL}`;
+  const type = kind === 'audio' ? 'audio' : kind === 'image' ? 'image' : 'video';
+  const r = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', to, type, [type]: { link } }),
+  });
+  if (!r.ok) console.error('media send failed', r.status, (await r.text()).slice(0, 200));
 }
 
 async function storeIncomingMedia(cfg, store, msg, type) {
@@ -248,41 +329,27 @@ async function storeIncomingMedia(cfg, store, msg, type) {
   return row.id;
 }
 
-// إضافة الملفات الجديدة إلى رد موجود
+// إضافة الملفات الجديدة المعلّقة إلى الرد الذي يتم تعديله
 async function applyEdit(cfg, phoneNumberId, from, session) {
-  const r = await fetch(
-    `${cfg.url}/rest/v1/auto_replies?id=eq.${session.edit_reply_id}&select=id,kind,media_id,media_ids`,
-    { headers: sbHeaders(cfg.key) }
-  );
-  const rows = await r.json();
-  const reply = Array.isArray(rows) ? rows[0] : null;
-  if (!reply) {
+  const data = await getReplyItems(cfg, session.edit_reply_id);
+  if (!data) {
     await resetSession(cfg, from);
     return sendText(cfg, phoneNumberId, from, 'تعذر العثور على الرد. أعد المحاولة بكتابة "تعديل".');
   }
 
-  const current = reply.kind === 'album'
-    ? (reply.media_ids || [])
-    : (reply.media_id ? [reply.media_id] : []);
+  const current = data.items.map(it => it.id);
   const added = session.pending_media_ids || [];
 
   if (current.length + added.length > ALBUM_MAX) {
     return sendText(cfg, phoneNumberId, from,
       'الحد الأقصى ' + ALBUM_MAX + ' ملفات في الرد الواحد. عندك الآن ' + current.length +
-      ' والجديد ' + added.length + '. احذف بعضها أو أرسل عدداً أقل.');
+      ' والجديد ' + added.length + '. احذف بعضها بكتابة "حذف رقم"، ثم اكتب "تم".');
   }
 
-  const merged = [...current, ...added];
-  const pr = await fetch(`${cfg.url}/rest/v1/auto_replies?id=eq.${reply.id}`, {
-    method: 'PATCH',
-    headers: { ...sbHeaders(cfg.key), Prefer: 'return=minimal' },
-    body: JSON.stringify({ kind: 'album', media_id: null, media_ids: merged }),
-  });
-  if (!pr.ok) throw new Error('edit failed');
-
+  await saveReplyIds(cfg, session.edit_reply_id, [...current, ...added]);
   await resetSession(cfg, from);
   return sendText(cfg, phoneNumberId, from,
-    '✓ تمت الإضافة. أصبح الرد يحتوي ' + merged.length + ' ملفات.');
+    '✓ تم حفظ التعديلات. أصبح الرد يحتوي ' + (current.length + added.length) + ' ملفات.');
 }
 
 async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
@@ -298,7 +365,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   if (cmd === CANCEL_CMD || text === '0') {
     await resetSession(cfg, from);
     return sendText(cfg, phoneNumberId, from,
-      'تم الإلغاء. أرسل "إضافة" لرد جديد، أو "تعديل" لإضافة ملفات لرد موجود.');
+      'تم الإلغاء. أرسل "إضافة" لرد جديد، أو "تعديل" لتعديل رد موجود.');
   }
 
   if (cmd === ADD_CMD) {
@@ -309,11 +376,10 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
 
   if (cmd === EDIT_CMD) {
     await resetSession(cfg, from, 'await_edit_keyword');
-    return sendText(cfg, phoneNumberId, from,
-      'اكتب إحدى كلمات الرد الذي تريد إضافة ملفات إليه.');
+    return sendText(cfg, phoneNumberId, from, 'اكتب إحدى كلمات الرد الذي تريد تعديله.');
   }
 
-  // أي ملف يُحفظ في الانتظار بصمت، بدون رد على كل ملف
+  // أي ملف يُحفظ بصمت في الانتظار
   if (isMedia) {
     if (session.state === 'await_edit_keyword') {
       return sendText(cfg, phoneNumberId, from, 'اكتب كلمة الرد أولاً، ثم أرسل الملفات.');
@@ -325,17 +391,21 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
 
   if (cmd === DONE_CMD) {
     const fresh = await getSession(cfg, from);
-    const count = (fresh.pending_media_ids || []).length;
 
     if (fresh.state === 'await_edit_keyword') {
       return sendText(cfg, phoneNumberId, from, 'اكتب كلمة الرد أولاً.');
     }
 
     if (fresh.state === 'await_edit_media') {
-      if (count === 0) return sendText(cfg, phoneNumberId, from, 'لم ترسل ملفات جديدة بعد.');
+      const count = (fresh.pending_media_ids || []).length;
+      if (count === 0) {
+        await resetSession(cfg, from);
+        return sendText(cfg, phoneNumberId, from, '✓ تم حفظ التعديلات.');
+      }
       return applyEdit(cfg, phoneNumberId, from, fresh);
     }
 
+    const count = (fresh.pending_media_ids || []).length;
     if (count === 0) {
       return sendText(cfg, phoneNumberId, from, 'لم ترسل ملفات بعد. أرسل "إضافة" ثم الملفات.');
     }
@@ -345,18 +415,19 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   }
 
   if (type !== 'text' || !text) {
-    return sendText(cfg, phoneNumberId, from, 'أرسل "إضافة" لرد جديد، أو "تعديل" لإضافة ملفات لرد موجود.');
+    return sendText(cfg, phoneNumberId, from, 'أرسل "إضافة" لرد جديد، أو "تعديل" لتعديل رد موجود.');
   }
 
-  // بعد "تعديل": الكلمة تحدد الرد المراد تعديله
+  // بعد "تعديل": الكلمة تحدد الرد، ثم نعرض محتواه
   if (session.state === 'await_edit_keyword') {
     const row = await findReplyForText(cfg, store.id, text);
     if (!row) {
       return sendText(cfg, phoneNumberId, from, 'لم أجد رداً بهذه الكلمة. اكتب كلمة أخرى، أو "إلغاء".');
     }
     if (row.kind === 'text') {
+      await resetSession(cfg, from);
       return sendText(cfg, phoneNumberId, from,
-        'هذا رد نصي، ولا يمكن إضافة ملفات إليه. أنشئ رداً جديداً بكتابة "إضافة".');
+        'هذا رد نصي، ولا يمكن تعديل ملفاته. أنشئ رداً جديداً بكتابة "إضافة".');
     }
     await setSession(cfg, from, {
       state: 'await_edit_media',
@@ -365,13 +436,17 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       pending_text: null,
       pending_media_id: null,
     });
-    return sendText(cfg, phoneNumberId, from,
-      'أرسل الملفات التي تريد إضافتها لهذا الرد (صور أو صوت أو فيديو)، ثم اكتب "تم".');
+    return sendEditMenu(cfg, phoneNumberId, from, row.id);
   }
 
+  // أثناء التعديل: حذف عنصر برقمه، أو تنبيه
   if (session.state === 'await_edit_media') {
+    const m = cmd.match(/^حذف (\d+)$/);
+    if (m) {
+      return removeEditItem(cfg, phoneNumberId, from, session, parseInt(m[1], 10));
+    }
     return sendText(cfg, phoneNumberId, from,
-      'أرسل الملفات، ثم اكتب "تم" للحفظ، أو "إلغاء" للإلغاء.');
+      'أرسل ملفات لإضافتها، أو "حذف رقم" لحذف عنصر، ثم "تم" للحفظ، أو "إلغاء".');
   }
 
   if (session.state === 'await_reply') {
@@ -389,7 +464,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   const fresh = await getSession(cfg, from);
   const hasPending = Boolean(fresh.pending_text) || (fresh.pending_media_ids || []).length > 0;
   if (!hasPending) {
-    return sendText(cfg, phoneNumberId, from, 'أرسل "إضافة" لرد جديد، أو "تعديل" لإضافة ملفات لرد موجود.');
+    return sendText(cfg, phoneNumberId, from, 'أرسل "إضافة" لرد جديد، أو "تعديل" لتعديل رد موجود.');
   }
 
   const keywords = parseKeywords(text);
