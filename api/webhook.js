@@ -144,7 +144,7 @@ async function findReplyForText(cfg, storeId, text) {
   return null;
 }
 
-// يرجع الرد وعناصره بالترتيب مع اسم كل ملف
+// يرجع الرد وعناصره بالترتيب، مع المسار ونوع كل ملف
 async function getReplyItems(cfg, replyId) {
   const r = await fetch(
     `${cfg.url}/rest/v1/auto_replies?id=eq.${replyId}&select=id,kind,media_id,media_ids`,
@@ -161,7 +161,7 @@ async function getReplyItems(cfg, replyId) {
   let byId = new Map();
   if (ids.length > 0) {
     const mr = await fetch(
-      `${cfg.url}/rest/v1/media_files?id=in.(${ids.join(',')})&select=id,kind,original_name`,
+      `${cfg.url}/rest/v1/media_files?id=in.(${ids.join(',')})&select=id,kind,storage_path,original_name`,
       { headers: sbHeaders(cfg.key) }
     );
     const mf = await mr.json();
@@ -170,7 +170,12 @@ async function getReplyItems(cfg, replyId) {
 
   const items = ids.map(id => {
     const f = byId.get(id) || {};
-    return { id, kind: f.kind || 'image', original_name: f.original_name || 'ملف' };
+    return {
+      id,
+      kind: f.kind || 'image',
+      storage_path: f.storage_path || null,
+      original_name: f.original_name || 'ملف',
+    };
   });
   return { reply, items };
 }
@@ -193,7 +198,7 @@ async function sendText(cfg, phoneNumberId, to, body) {
   if (!r.ok) console.error('send failed', r.status, (await r.text()).slice(0, 200));
 }
 
-// عرض محتوى الرد الحالي للتاجر بأرقام، ليحذف أو يضيف
+// يرسل للتاجر محتوى الرد الفعلي: كل عنصر كما سيصل للزبون، مع رقمه قبله
 async function sendEditMenu(cfg, phoneNumberId, from, replyId) {
   const data = await getReplyItems(cfg, replyId);
   if (!data) {
@@ -201,15 +206,21 @@ async function sendEditMenu(cfg, phoneNumberId, from, replyId) {
     return sendText(cfg, phoneNumberId, from, 'تعذر العثور على الرد. أعد المحاولة بكتابة "تعديل".');
   }
 
-  const lines = data.items.map((it, i) =>
-    (i + 1) + '. ' + (KIND_AR[it.kind] || 'ملف') + ': ' + it.original_name
-  );
-  const head = lines.length > 0
-    ? 'محتوى الرد الحالي:\n' + lines.join('\n')
-    : 'هذا الرد لا يحتوي ملفات حالياً.';
+  if (data.items.length === 0) {
+    await sendText(cfg, phoneNumberId, from, 'هذا الرد لا يحتوي ملفات حالياً.');
+  } else {
+    await sendText(cfg, phoneNumberId, from, 'محتوى الرد الحالي (' + data.items.length + ' عناصر):');
+    for (let i = 0; i < data.items.length; i++) {
+      const it = data.items[i];
+      await sendText(cfg, phoneNumberId, from, (i + 1) + '. ' + (KIND_AR[it.kind] || 'ملف'));
+      if (it.storage_path) {
+        await sendMediaReply(cfg, phoneNumberId, from, it.kind, it);
+      }
+    }
+  }
 
   return sendText(cfg, phoneNumberId, from,
-    head + '\n\nأرسل ملفات لإضافتها، أو اكتب "حذف 2" مثلاً لحذف عنصر، ثم اكتب "تم" للحفظ.');
+    'أرسل ملفات لإضافتها، أو اكتب "حذف 2" مثلاً لحذف عنصر، ثم اكتب "تم" للحفظ.');
 }
 
 async function removeEditItem(cfg, phoneNumberId, from, session, index) {
@@ -230,6 +241,7 @@ async function removeEditItem(cfg, phoneNumberId, from, session, index) {
 
   const ids = items.filter((_, i) => i !== index - 1).map(it => it.id);
   await saveReplyIds(cfg, session.edit_reply_id, ids);
+  await sendText(cfg, phoneNumberId, from, '✓ تم حذف العنصر رقم ' + index + '.');
   return sendEditMenu(cfg, phoneNumberId, from, session.edit_reply_id);
 }
 
@@ -418,7 +430,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendText(cfg, phoneNumberId, from, 'أرسل "إضافة" لرد جديد، أو "تعديل" لتعديل رد موجود.');
   }
 
-  // بعد "تعديل": الكلمة تحدد الرد، ثم نعرض محتواه
+  // بعد "تعديل": الكلمة تحدد الرد، ثم نرسل محتواه الفعلي
   if (session.state === 'await_edit_keyword') {
     const row = await findReplyForText(cfg, store.id, text);
     if (!row) {
