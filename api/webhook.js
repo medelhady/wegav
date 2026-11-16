@@ -38,7 +38,6 @@ function parseKeywords(text) {
   return [...new Set(list)];
 }
 
-// يقبل كل صيغ كلمة "إضافة" وأخطاءها الشائعة: إضافة، إضافه، اضافة، اضافه، أضافة، اضف
 const ADD_RE = /^ا?ض ?ا?ف ?ه?$/;
 
 const EDIT_CMD = normalize('تعديل');
@@ -162,6 +161,22 @@ const MSG = {
   doneNeedEditKeyword: '✏️ اختر رقم الرد أولاً.',
   filesStoredInEditKeyword: '✏️ اختر رقم الرد أولاً، ثم أرسل الملفات.',
 };
+
+// تحميل الرسائل المعدّلة من قاعدة البيانات، وتطبيقها فوق الرسائل الأصلية
+async function loadBotMessages(cfg) {
+  try {
+    const r = await fetch(`${cfg.url}/rest/v1/bot_messages?select=key,value`, {
+      headers: sbHeaders(cfg.key),
+    });
+    const rows = await r.json();
+    if (!Array.isArray(rows)) return;
+    for (const row of rows) {
+      if (typeof MSG[row.key] === 'string' && row.value) MSG[row.key] = row.value;
+    }
+  } catch (err) {
+    console.error('bot messages load failed:', err?.message || err);
+  }
+}
 
 function sbHeaders(key) {
   return { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json' };
@@ -814,6 +829,9 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
 }
 
 async function handleMessage(cfg, phoneNumberId, msg) {
+  // نحمّل الرسائل المعدّلة قبل أي رد
+  await loadBotMessages(cfg);
+
   const from = String(msg.from || '');
   const session = await getSession(cfg, from);
 
