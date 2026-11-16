@@ -40,7 +40,6 @@ const REGISTER_CMD = normalize('تسجيل');
 const MENU_CMD = normalize('قائمة');
 const QUOTA_CMD = normalize('حصتي');
 
-// كل رسائل البوت في مكان واحد لتسهيل تعديلها
 const MSG = {
   customerWelcome:
     '👋 *أهلاً بك!*\n\n' +
@@ -557,6 +556,15 @@ async function applyEdit(cfg, phoneNumberId, from, session) {
 }
 
 async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
+  // واتساب يرسل بعض الصور والفيديو كـ"مستند": نحوّلها إلى نوعها الصحيح
+  if (msg.type === 'document') {
+    const mime = String(msg.document?.mime_type || '');
+    const kind = mime.startsWith('image/') ? 'image'
+      : mime.startsWith('video/') ? 'video'
+      : mime.startsWith('audio/') ? 'audio' : null;
+    if (kind) msg = { ...msg, type: kind, [kind]: msg.document };
+  }
+
   const type = msg.type;
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
   const cmd = normalize(text);
