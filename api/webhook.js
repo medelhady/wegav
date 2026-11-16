@@ -31,6 +31,7 @@ function parseKeywords(text) {
 }
 
 const ADD_CMD = normalize('إضافة');
+const EDIT_CMD = normalize('تعديل');
 const CANCEL_CMD = normalize('إلغاء');
 const DONE_CMD = normalize('تم');
 
@@ -64,6 +65,17 @@ async function setSession(cfg, phone, patch) {
     body: JSON.stringify({ phone, ...patch, updated_at: new Date().toISOString() }),
   });
   if (!r.ok) throw new Error('session save failed');
+}
+
+async function resetSession(cfg, phone, state = 'idle') {
+  await setSession(cfg, phone, {
+    state,
+    keywords: [],
+    pending_text: null,
+    pending_media_id: null,
+    pending_media_ids: [],
+    edit_reply_id: null,
+  });
 }
 
 async function appendPendingMedia(cfg, phone, mediaId) {
@@ -236,6 +248,43 @@ async function storeIncomingMedia(cfg, store, msg, type) {
   return row.id;
 }
 
+// إضافة الملفات الجديدة إلى رد موجود
+async function applyEdit(cfg, phoneNumberId, from, session) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/auto_replies?id=eq.${session.edit_reply_id}&select=id,kind,media_id,media_ids`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const rows = await r.json();
+  const reply = Array.isArray(rows) ? rows[0] : null;
+  if (!reply) {
+    await resetSession(cfg, from);
+    return sendText(cfg, phoneNumberId, from, 'تعذر العثور على الرد. أعد المحاولة بكتابة "تعديل".');
+  }
+
+  const current = reply.kind === 'album'
+    ? (reply.media_ids || [])
+    : (reply.media_id ? [reply.media_id] : []);
+  const added = session.pending_media_ids || [];
+
+  if (current.length + added.length > ALBUM_MAX) {
+    return sendText(cfg, phoneNumberId, from,
+      'الحد الأقصى ' + ALBUM_MAX + ' ملفات في الرد الواحد. عندك الآن ' + current.length +
+      ' والجديد ' + added.length + '. احذف بعضها أو أرسل عدداً أقل.');
+  }
+
+  const merged = [...current, ...added];
+  const pr = await fetch(`${cfg.url}/rest/v1/auto_replies?id=eq.${reply.id}`, {
+    method: 'PATCH',
+    headers: { ...sbHeaders(cfg.key), Prefer: 'return=minimal' },
+    body: JSON.stringify({ kind: 'album', media_id: null, media_ids: merged }),
+  });
+  if (!pr.ok) throw new Error('edit failed');
+
+  await resetSession(cfg, from);
+  return sendText(cfg, phoneNumberId, from,
+    '✓ تمت الإضافة. أصبح الرد يحتوي ' + merged.length + ' ملفات.');
+}
+
 async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   const type = msg.type;
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
@@ -247,90 +296,135 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   }
 
   if (cmd === CANCEL_CMD || text === '0') {
-    await setSession(cfg, from, {
-      state: 'idle', keywords: [], pending_text: null, pending_media_id: null, pending_media_ids: [],
-    });
-    return sendText(cfg, phoneNumberId, from, 'تم الإلغاء. أرسل "إضافة" لإضافة رد جديد.');
+    await resetSession(cfg, from);
+    return sendText(cfg, phoneNumberId, from,
+      'تم الإلغاء. أرسل "إضافة" لرد جديد، أو "تعديل" لإضافة ملفات لرد موجود.');
   }
 
   if (cmd === ADD_CMD) {
-    await setSession(cfg, from, {
-      state: 'await_reply', keywords: [], pending_text: null, pending_media_id: null, pending_media_ids: [],
-    });
+    await resetSession(cfg, from, 'await_reply');
     return sendText(cfg, phoneNumberId, from,
       'أرسل الرد الآن: نص، أو صوت، أو صورة، أو فيديو. ولأكثر من ملف أرسلها واحداً تلو الآخر، ثم اكتب "تم".');
   }
 
-  // استلام الملفات بصمت: بدون رد على كل ملف
-  if (isMedia && (session.state === 'await_reply' || session.state === 'await_keywords')) {
+  if (cmd === EDIT_CMD) {
+    await resetSession(cfg, from, 'await_edit_keyword');
+    return sendText(cfg, phoneNumberId, from,
+      'اكتب إحدى كلمات الرد الذي تريد إضافة ملفات إليه.');
+  }
+
+  // أي ملف يُحفظ في الانتظار بصمت، بدون رد على كل ملف
+  if (isMedia) {
+    if (session.state === 'await_edit_keyword') {
+      return sendText(cfg, phoneNumberId, from, 'اكتب كلمة الرد أولاً، ثم أرسل الملفات.');
+    }
     const mediaId = await storeIncomingMedia(cfg, store, msg, type);
     await appendPendingMedia(cfg, from, mediaId);
     return;
   }
 
-  // التاجر أنهى إرسال الملفات: نعرض العدد مرة واحدة
   if (cmd === DONE_CMD) {
     const fresh = await getSession(cfg, from);
     const count = (fresh.pending_media_ids || []).length;
-    if (count === 0) {
-      return sendText(cfg, phoneNumberId, from, 'لم ترسل ملفات بعد.');
+
+    if (fresh.state === 'await_edit_keyword') {
+      return sendText(cfg, phoneNumberId, from, 'اكتب كلمة الرد أولاً.');
     }
+
+    if (fresh.state === 'await_edit_media') {
+      if (count === 0) return sendText(cfg, phoneNumberId, from, 'لم ترسل ملفات جديدة بعد.');
+      return applyEdit(cfg, phoneNumberId, from, fresh);
+    }
+
+    if (count === 0) {
+      return sendText(cfg, phoneNumberId, from, 'لم ترسل ملفات بعد. أرسل "إضافة" ثم الملفات.');
+    }
+    await setSession(cfg, from, { state: 'await_keywords' });
     return sendText(cfg, phoneNumberId, from,
       'تم استلام ' + count + ' ملف. اكتب الكلمات التي سيرد بها، مفصولة بفاصلة أو بسطر لكل كلمة.');
   }
 
-  if (session.state === 'await_reply' && type === 'text' && text) {
+  if (type !== 'text' || !text) {
+    return sendText(cfg, phoneNumberId, from, 'أرسل "إضافة" لرد جديد، أو "تعديل" لإضافة ملفات لرد موجود.');
+  }
+
+  // بعد "تعديل": الكلمة تحدد الرد المراد تعديله
+  if (session.state === 'await_edit_keyword') {
+    const row = await findReplyForText(cfg, store.id, text);
+    if (!row) {
+      return sendText(cfg, phoneNumberId, from, 'لم أجد رداً بهذه الكلمة. اكتب كلمة أخرى، أو "إلغاء".');
+    }
+    if (row.kind === 'text') {
+      return sendText(cfg, phoneNumberId, from,
+        'هذا رد نصي، ولا يمكن إضافة ملفات إليه. أنشئ رداً جديداً بكتابة "إضافة".');
+    }
+    await setSession(cfg, from, {
+      state: 'await_edit_media',
+      edit_reply_id: row.id,
+      pending_media_ids: [],
+      pending_text: null,
+      pending_media_id: null,
+    });
+    return sendText(cfg, phoneNumberId, from,
+      'أرسل الملفات التي تريد إضافتها لهذا الرد (صور أو صوت أو فيديو)، ثم اكتب "تم".');
+  }
+
+  if (session.state === 'await_edit_media') {
+    return sendText(cfg, phoneNumberId, from,
+      'أرسل الملفات، ثم اكتب "تم" للحفظ، أو "إلغاء" للإلغاء.');
+  }
+
+  if (session.state === 'await_reply') {
     if (text.length > TEXT_MAX) {
       return sendText(cfg, phoneNumberId, from, 'النص طويل جداً (الحد 1000 حرف).');
     }
-    await setSession(cfg, from, { state: 'await_keywords', pending_text: text, pending_media_id: null, pending_media_ids: [] });
+    await setSession(cfg, from, {
+      state: 'await_keywords', pending_text: text, pending_media_id: null, pending_media_ids: [],
+    });
     return sendText(cfg, phoneNumberId, from,
       'تم استلام النص. اكتب الكلمات التي سيرد بها، مفصولة بفاصلة أو بسطر لكل كلمة.');
   }
 
-  if (session.state === 'await_keywords' && type === 'text' && text) {
-    const keywords = parseKeywords(text);
-    if (keywords.length === 0 || keywords.length > KEYWORDS_MAX) {
-      return sendText(cfg, phoneNumberId, from, 'اكتب من 1 إلى ' + KEYWORDS_MAX + ' كلمة.');
-    }
-    if (keywords.some(k => k.length > KEYWORD_LEN_MAX)) {
-      return sendText(cfg, phoneNumberId, from, 'إحدى الكلمات طويلة جداً.');
-    }
-
-    const conflicts = await findConflicts(cfg, store.id, keywords);
-    if (conflicts.length > 0) {
-      return sendText(cfg, phoneNumberId, from, 'هذه الكلمات مستخدمة في رد آخر: ' + conflicts.join('، '));
-    }
-
-    const fresh = await getSession(cfg, from);
-    let row;
-
-    if (session.pending_text) {
-      row = { store_id: store.id, keywords, kind: 'text', content: session.pending_text, media_id: null };
-    } else if ((fresh.pending_media_ids || []).length > 0) {
-      const ids = fresh.pending_media_ids.slice(0, ALBUM_MAX);
-      if (ids.length === 1) {
-        const mr = await fetch(
-          `${cfg.url}/rest/v1/media_files?id=eq.${ids[0]}&select=kind`,
-          { headers: sbHeaders(cfg.key) }
-        );
-        const [mf] = await mr.json();
-        row = { store_id: store.id, keywords, kind: mf.kind, content: null, media_id: ids[0] };
-      } else {
-        row = { store_id: store.id, keywords, kind: 'album', content: null, media_id: null, media_ids: ids };
-      }
-    } else {
-      return sendText(cfg, phoneNumberId, from, 'أرسل نصاً أو ملفات أولاً، ثم الكلمات.');
-    }
-
-    await sbInsert(cfg, 'auto_replies', row);
-    await setSession(cfg, from, {
-      state: 'idle', keywords: [], pending_text: null, pending_media_id: null, pending_media_ids: [],
-    });
-    return sendText(cfg, phoneNumberId, from, '✓ تم حفظ الرد. الكلمات: ' + keywords.join('، '));
+  // أي نص آخر بعد الملفات أو النص: هذه هي الكلمات
+  const fresh = await getSession(cfg, from);
+  const hasPending = Boolean(fresh.pending_text) || (fresh.pending_media_ids || []).length > 0;
+  if (!hasPending) {
+    return sendText(cfg, phoneNumberId, from, 'أرسل "إضافة" لرد جديد، أو "تعديل" لإضافة ملفات لرد موجود.');
   }
 
-  return sendText(cfg, phoneNumberId, from, 'أرسل "إضافة" لإضافة رد جديد، أو "إلغاء" للإلغاء.');
+  const keywords = parseKeywords(text);
+  if (keywords.length === 0 || keywords.length > KEYWORDS_MAX) {
+    return sendText(cfg, phoneNumberId, from, 'اكتب من 1 إلى ' + KEYWORDS_MAX + ' كلمة.');
+  }
+  if (keywords.some(k => k.length > KEYWORD_LEN_MAX)) {
+    return sendText(cfg, phoneNumberId, from, 'إحدى الكلمات طويلة جداً.');
+  }
+
+  const conflicts = await findConflicts(cfg, store.id, keywords);
+  if (conflicts.length > 0) {
+    return sendText(cfg, phoneNumberId, from, 'هذه الكلمات مستخدمة في رد آخر: ' + conflicts.join('، '));
+  }
+
+  let row;
+  if (fresh.pending_text) {
+    row = { store_id: store.id, keywords, kind: 'text', content: fresh.pending_text, media_id: null };
+  } else {
+    const ids = fresh.pending_media_ids.slice(0, ALBUM_MAX);
+    if (ids.length === 1) {
+      const mr = await fetch(
+        `${cfg.url}/rest/v1/media_files?id=eq.${ids[0]}&select=kind`,
+        { headers: sbHeaders(cfg.key) }
+      );
+      const [mf] = await mr.json();
+      row = { store_id: store.id, keywords, kind: mf.kind, content: null, media_id: ids[0] };
+    } else {
+      row = { store_id: store.id, keywords, kind: 'album', content: null, media_id: null, media_ids: ids };
+    }
+  }
+
+  await sbInsert(cfg, 'auto_replies', row);
+  await resetSession(cfg, from);
+  return sendText(cfg, phoneNumberId, from, '✓ تم حفظ الرد. الكلمات: ' + keywords.join('، '));
 }
 
 async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
