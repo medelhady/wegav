@@ -2,6 +2,40 @@ function sbHeaders(key) {
   return { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json' };
 }
 
+async function sbDelete(url, key, path) {
+  const r = await fetch(`${url}${path}`, {
+    method: 'DELETE',
+    headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
+  });
+  return r;
+}
+
+async function deleteStoreData(url, key, storeId) {
+  // 1) ملفات التخزين للمتجر
+  const mr = await fetch(
+    `${url}/rest/v1/media_files?store_id=eq.${storeId}&select=storage_path`,
+    { headers: sbHeaders(key) }
+  );
+  const files = await mr.json();
+  if (Array.isArray(files) && files.length > 0) {
+    const paths = files.map(f => f.storage_path).filter(Boolean);
+    if (paths.length > 0) {
+      await fetch(`${url}/storage/v1/object/media`, {
+        method: 'DELETE',
+        headers: sbHeaders(key),
+        body: JSON.stringify({ prefixes: paths }),
+      });
+    }
+  }
+
+  // 2) حذف المتجر نفسه، والجداول المرتبطة تُحذف تلقائياً (on delete cascade)
+  const r = await sbDelete(url, key, `/rest/v1/stores?id=eq.${storeId}`);
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error('فشل حذف المتجر: ' + text.slice(0, 200));
+  }
+}
+
 export default async function handler(req, res) {
   try {
     const url = (process.env.SUPABASE_URL || '').trim();
@@ -15,7 +49,6 @@ export default async function handler(req, res) {
     }
     body = body || {};
 
-    // كل الطلبات تتطلب كلمة السر
     const pass = String(req.headers['x-admin-password'] || '');
     if (pass !== adminPass) return res.status(401).json({ error: 'كلمة السر غير صحيحة' });
 
@@ -33,6 +66,22 @@ export default async function handler(req, res) {
       const id = String(body.id || '');
       const action = String(body.action || '');
       if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'Invalid id' });
+
+      if (action === 'delete') {
+        // تأكيد الحذف يجب أن يحمل اسم المتجر مكتوباً بالضبط
+        const confirmName = String(body.confirm_name || '').trim();
+        const sr = await fetch(
+          `${url}/rest/v1/stores?id=eq.${id}&select=name`,
+          { headers: sbHeaders(key) }
+        );
+        const [store] = await sr.json();
+        if (!store) return res.status(404).json({ error: 'المتجر غير موجود' });
+        if (confirmName !== store.name) {
+          return res.status(400).json({ error: 'اسم التأكيد غير مطابق' });
+        }
+        await deleteStoreData(url, key, id);
+        return res.status(200).json({ ok: true });
+      }
 
       let patch = null;
       if (action === 'pause') patch = { status: 'paused' };
