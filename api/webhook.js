@@ -144,6 +144,29 @@ async function findReplyForText(cfg, storeId, text) {
   return null;
 }
 
+// كل ردود المتجر بترتيب ثابت، لتطابق أرقام القائمة
+async function listStoreReplies(cfg, storeId) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords,kind,content,media_id,media_ids&order=created_at.asc`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const rows = await r.json();
+  return Array.isArray(rows) ? rows : [];
+}
+
+function replyLabel(row) {
+  const kw = (row.keywords || []).join('، ');
+  let kind;
+  if (row.kind === 'text') {
+    kind = 'نص';
+  } else if (row.kind === 'album') {
+    kind = 'ألبوم (' + (row.media_ids || []).length + ' ملفات)';
+  } else {
+    kind = KIND_AR[row.kind] || 'ملف';
+  }
+  return kw + ' - ' + kind;
+}
+
 // يرجع الرد وعناصره بالترتيب، مع المسار ونوع كل ملف
 async function getReplyItems(cfg, replyId) {
   const r = await fetch(
@@ -196,6 +219,18 @@ async function sendText(cfg, phoneNumberId, to, body) {
     body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body } }),
   });
   if (!r.ok) console.error('send failed', r.status, (await r.text()).slice(0, 200));
+}
+
+// يعرض للتاجر كل ردود المتجر مرقمة، ليختار أحدها
+async function sendReplyList(cfg, phoneNumberId, from, storeId) {
+  const rows = await listStoreReplies(cfg, storeId);
+  if (rows.length === 0) {
+    await resetSession(cfg, from);
+    return sendText(cfg, phoneNumberId, from, 'لا توجد ردود بعد. أرسل "إضافة" لإنشاء رد جديد.');
+  }
+  const lines = rows.map((r, i) => (i + 1) + '. ' + replyLabel(r));
+  return sendText(cfg, phoneNumberId, from,
+    'اختر رقم الرد الذي تريد تعديله:\n\n' + lines.join('\n') + '\n\nأو اكتب كلمة الرد مباشرة.');
 }
 
 // يرسل للتاجر محتوى الرد الفعلي: كل عنصر كما سيصل للزبون، مع رقمه قبله
@@ -388,13 +423,13 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
 
   if (cmd === EDIT_CMD) {
     await resetSession(cfg, from, 'await_edit_keyword');
-    return sendText(cfg, phoneNumberId, from, 'اكتب إحدى كلمات الرد الذي تريد تعديله.');
+    return sendReplyList(cfg, phoneNumberId, from, store.id);
   }
 
   // أي ملف يُحفظ بصمت في الانتظار
   if (isMedia) {
     if (session.state === 'await_edit_keyword') {
-      return sendText(cfg, phoneNumberId, from, 'اكتب كلمة الرد أولاً، ثم أرسل الملفات.');
+      return sendText(cfg, phoneNumberId, from, 'اختر رقم الرد أولاً، ثم أرسل الملفات.');
     }
     const mediaId = await storeIncomingMedia(cfg, store, msg, type);
     await appendPendingMedia(cfg, from, mediaId);
@@ -405,7 +440,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     const fresh = await getSession(cfg, from);
 
     if (fresh.state === 'await_edit_keyword') {
-      return sendText(cfg, phoneNumberId, from, 'اكتب كلمة الرد أولاً.');
+      return sendText(cfg, phoneNumberId, from, 'اختر رقم الرد أولاً.');
     }
 
     if (fresh.state === 'await_edit_media') {
@@ -430,17 +465,32 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendText(cfg, phoneNumberId, from, 'أرسل "إضافة" لرد جديد، أو "تعديل" لتعديل رد موجود.');
   }
 
-  // بعد "تعديل": الكلمة تحدد الرد، ثم نرسل محتواه الفعلي
+  // بعد "تعديل": رقم من القائمة أو كلمة الرد، ثم نرسل محتواه
   if (session.state === 'await_edit_keyword') {
-    const row = await findReplyForText(cfg, store.id, text);
-    if (!row) {
-      return sendText(cfg, phoneNumberId, from, 'لم أجد رداً بهذه الكلمة. اكتب كلمة أخرى، أو "إلغاء".');
+    let row = null;
+
+    if (/^\d+$/.test(text)) {
+      const list = await listStoreReplies(cfg, store.id);
+      const index = parseInt(text, 10) - 1;
+      row = list[index] || null;
+      if (!row) {
+        return sendText(cfg, phoneNumberId, from,
+          'رقم غير موجود. اختر رقماً من القائمة، أو اكتب كلمة الرد، أو "إلغاء".');
+      }
+    } else {
+      row = await findReplyForText(cfg, store.id, text);
+      if (!row) {
+        return sendText(cfg, phoneNumberId, from,
+          'لم أجد رداً بهذه الكلمة. اختر رقماً من القائمة، أو اكتب كلمة أخرى، أو "إلغاء".');
+      }
     }
+
     if (row.kind === 'text') {
       await resetSession(cfg, from);
       return sendText(cfg, phoneNumberId, from,
         'هذا رد نصي، ولا يمكن تعديل ملفاته. أنشئ رداً جديداً بكتابة "إضافة".');
     }
+
     await setSession(cfg, from, {
       state: 'await_edit_media',
       edit_reply_id: row.id,
