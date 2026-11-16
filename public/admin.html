@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>لوحة الإدارة</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;color:#222}
+.wrap{max-width:720px;margin:0 auto;padding:16px}
+.card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:12px}
+h1{font-size:18px;margin:0 0 4px}
+.sub{font-size:13px;color:#666}
+input[type=password]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-size:15px}
+.btn{background:#1a73e8;color:#fff;border:0;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13px;font-weight:600;margin:2px}
+.btn.gray{background:#fff;color:#333;border:1px solid #ccc}
+.btn.red{background:#fff;color:#d93025;border:1px solid #f1b3ad}
+.btn.green{background:#188038}
+.btn:disabled{opacity:.5;cursor:wait}
+.store{border-bottom:1px dashed #eee;padding:12px 0}
+.store:last-child{border-bottom:0}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.name{font-weight:700;font-size:15px}
+.meta{font-size:13px;color:#555;margin-top:4px;line-height:1.7}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700}
+.b-active{background:#e6f4ea;color:#188038}
+.b-paused{background:#fef7e0;color:#b06000}
+.b-suspended{background:#fce8e6;color:#d93025}
+.stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.stat{flex:1;min-width:120px;background:#fff;border-radius:10px;padding:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.stat .k{font-size:12px;color:#777}
+.stat .v{font-size:20px;font-weight:700;margin-top:4px}
+#msg{font-size:13px;margin-top:8px;min-height:18px}
+.ok{color:#188038}.err{color:#d93025}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- شاشة الدخول -->
+  <div class="card" id="login-box">
+    <h1>لوحة الإدارة</h1>
+    <div class="sub" style="margin-bottom:12px">أدخل كلمة السر للمتابعة</div>
+    <input type="password" id="pass" placeholder="كلمة السر">
+    <div style="margin-top:12px;text-align:left">
+      <button class="btn" id="btn-login">دخول</button>
+    </div>
+    <div id="login-msg" class="err" style="margin-top:8px;font-size:13px"></div>
+  </div>
+
+  <!-- لوحة الإدارة -->
+  <div id="app" class="hidden">
+    <div class="card row">
+      <div>
+        <h1>لوحة الإدارة</h1>
+        <div class="sub">إدارة التجار والاشتراكات</div>
+      </div>
+      <div>
+        <button class="btn gray" id="btn-refresh">تحديث</button>
+        <button class="btn gray" id="btn-logout">خروج</button>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="k">إجمالي التجار</div><div class="v" id="s-total">0</div></div>
+      <div class="stat"><div class="k">الفعّالون</div><div class="v" id="s-active">0</div></div>
+      <div class="stat"><div class="k">المدفوعون</div><div class="v" id="s-paid">0</div></div>
+      <div class="stat"><div class="k">الموقوفون</div><div class="v" id="s-susp">0</div></div>
+    </div>
+
+    <div class="card">
+      <div id="list"></div>
+      <div id="msg"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+let password = sessionStorage.getItem('admin_pass') || '';
+let stores = [];
+
+const $ = id => document.getElementById(id);
+
+const STATUS_LABEL = { active: 'فعّال', paused: 'متوقف مؤقتاً', suspended: 'موقوف' };
+
+function show(text, cls) {
+  const m = $('msg');
+  m.className = cls || '';
+  m.textContent = text;
+}
+
+async function api(method, body) {
+  const res = await fetch('/api/admin', {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Password': password },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || ('HTTP ' + res.status));
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+function fmtDate(iso) {
+  if (!iso) return 'بدون تاريخ';
+  return new Date(iso).toLocaleDateString('ar');
+}
+
+function renderStats() {
+  $('s-total').textContent = stores.length;
+  $('s-active').textContent = stores.filter(s => s.status === 'active').length;
+  $('s-paid').textContent = stores.filter(s => s.plan === 'paid').length;
+  $('s-susp').textContent = stores.filter(s => s.status === 'suspended').length;
+}
+
+function renderList() {
+  const box = $('list');
+  box.innerHTML = '';
+  if (stores.length === 0) {
+    box.innerHTML = '<div class="sub">لا يوجد تجار بعد</div>';
+    return;
+  }
+
+  stores.forEach(s => {
+    const row = document.createElement('div');
+    row.className = 'store';
+
+    const top = document.createElement('div');
+    top.className = 'row';
+
+    const info = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = s.name + '  (كود ' + s.merchant_code + ')';
+    const badge = document.createElement('span');
+    badge.className = 'badge b-' + s.status;
+    badge.textContent = STATUS_LABEL[s.status] || s.status;
+    name.append(' ', badge);
+    info.appendChild(name);
+
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent =
+      'الهاتف: ' + (s.phone || '—') + '\n' +
+      'الخطة: ' + (s.plan === 'paid' ? 'مدفوعة' : 'تجريبية') + ' | ' +
+      'الردود: ' + s.replies_used + ' من ' + s.replies_quota + ' | ' +
+      'الانتهاء: ' + fmtDate(s.plan_expires_at);
+    meta.style.whiteSpace = 'pre-line';
+    info.appendChild(meta);
+
+    top.appendChild(info);
+    row.appendChild(top);
+
+    const actions = document.createElement('div');
+    actions.style.marginTop = '8px';
+
+    const addBtn = (label, cls, fn) => {
+      const b = document.createElement('button');
+      b.className = 'btn ' + (cls || '');
+      b.textContent = label;
+      b.addEventListener('click', () => fn(b));
+      actions.appendChild(b);
+    };
+
+    addBtn('تفعيل', 'green', b => act(s.id, 'activate', {}, b));
+    addBtn('إيقاف مؤقت', 'gray', b => act(s.id, 'pause', {}, b));
+    addBtn('إيقاف كامل', 'red', b => act(s.id, 'suspend', {}, b));
+    addBtn('اشتراك شهري (500 رد)', '', b => act(s.id, 'paid', { quota: 500, months: 1 }, b));
+    addBtn('تصفير الردود', 'gray', b => act(s.id, 'reset', {}, b));
+
+    row.appendChild(actions);
+    box.appendChild(row);
+  });
+}
+
+async function act(id, action, extra, btn) {
+  const store = stores.find(x => x.id === id);
+  const label = store ? store.name : '';
+  if (!confirm('تأكيد: ' + label + ' — ' + btn.textContent + '؟')) return;
+
+  btn.disabled = true;
+  try {
+    await api('POST', { id, action, ...extra });
+    show('✓ تم: ' + btn.textContent + ' لـ ' + label, 'ok');
+    await load();
+  } catch (e) {
+    show('✗ فشل: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function load() {
+  try {
+    const data = await api('GET');
+    stores = Array.isArray(data.items) ? data.items : [];
+    renderStats();
+    renderList();
+  } catch (e) {
+    if (e.status === 401) {
+      sessionStorage.removeItem('admin_pass');
+      password = '';
+      showLogin('كلمة السر غير صحيحة');
+      return;
+    }
+    show('✗ تعذر التحميل: ' + e.message, 'err');
+  }
+}
+
+function showLogin(msg) {
+  $('app').classList.add('hidden');
+  $('login-box').classList.remove('hidden');
+  $('login-msg').textContent = msg || '';
+}
+
+function showApp() {
+  $('login-box').classList.add('hidden');
+  $('app').classList.remove('hidden');
+}
+
+$('btn-login').addEventListener('click', async () => {
+  password = $('pass').value.trim();
+  if (!password) return ($('login-msg').textContent = 'اكتب كلمة السر');
+  sessionStorage.setItem('admin_pass', password);
+  showApp();
+  await load();
+  if (!stores.length && $('msg').classList.contains('err')) return;
+});
+
+$('pass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') $('btn-login').click();
+});
+
+$('btn-refresh').addEventListener('click', load);
+
+$('btn-logout').addEventListener('click', () => {
+  sessionStorage.removeItem('admin_pass');
+  password = '';
+  showLogin('');
+});
+
+if (password) {
+  showApp();
+  load();
+}
+</script>
+</body>
+</html>
