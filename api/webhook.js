@@ -46,6 +46,8 @@ const DONE_CMD = normalize('تم');
 const REGISTER_CMD = normalize('تسجيل');
 const MENU_CMD = normalize('قائمة');
 const QUOTA_CMD = normalize('حصتي');
+const WELCOME_CMD = normalize('ترحيب');
+const WELCOME_DEL_CMD = normalize('حذف الترحيب');
 
 const MSG = {
   customerWelcome:
@@ -74,12 +76,14 @@ const MSG = {
     '🔑 كودك: *' + store.merchant_code + '*\n' +
     '🎁 تجربتك المجانية: *' + TRIAL_REPLIES + ' رداً*\n\n' +
     '📌 *ابدأ الآن:*\n' +
-    '1️⃣ اكتب *إضافة* لإضافة رد\n' +
-    '2️⃣ اكتب *قائمة* لعرض كل الخيارات\n\n' +
+    '1️⃣ اكتب *ترحيب* لتحديد الرسالة التي يستقبلها الزبون عند دخول متجرك\n' +
+    '2️⃣ اكتب *إضافة* لإضافة رد\n' +
+    '3️⃣ اكتب *قائمة* لعرض كل الخيارات\n\n' +
     'أعط زبائنك الكود ليكتبوه للبوت ويحصلوا على ردودك.',
   menu: (store, used, quota) =>
     '📋 *قائمة التاجر*\n' +
     '━━━━━━━━━━━━\n' +
+    '🎉 *ترحيب* ← الرسالة التي يستقبلها الزبون عند دخول متجرك\n' +
     '➕ *إضافة* ← رد جديد\n' +
     '✏️ *تعديل* ← تعديل رد موجود\n' +
     '🗑 *حذف 2* ← حذف الرد رقم 2\n' +
@@ -93,6 +97,14 @@ const MSG = {
     'استخدمت: *' + used + '* رد\n' +
     'المتبقي: *' + Math.max(0, quota - used) + '* رد\n' +
     'الإجمالي: *' + quota + '* رد',
+  welcomeAsk:
+    '🎉 *رسالة الترحيب*\n\n' +
+    'أرسل الآن الرسالة التي يستقبلها الزبون عند دخول متجرك:\n' +
+    '• نص مكتوب\n' +
+    '• أو صورة، أو صوت، أو فيديو (ويمكنك كتابة تعليق مع الصورة أو الفيديو)\n\n' +
+    'للتراجع اكتب *إلغاء*، ولحذفها اكتب *حذف الترحيب*.',
+  welcomeSaved: '✅ *تم حفظ رسالة الترحيب*\n\nستصل للزبائن عند إدخال كود متجرك.',
+  welcomeRemoved: '🗑 *تم حذف رسالة الترحيب*\n\nسيستقبل الزبائن الرسالة الافتراضية.',
   addStart:
     '➕ *إضافة رد جديد*\n\n' +
     'أرسل الرد الآن:\n' +
@@ -162,7 +174,6 @@ const MSG = {
   filesStoredInEditKeyword: '✏️ اختر رقم الرد أولاً، ثم أرسل الملفات.',
 };
 
-// الرسائل المعدّلة من الإدارة: النوع والملف ونص الرسالة
 const BOT_MEDIA = {};
 let MSG_KEY_BY_TEXT = new Map();
 
@@ -244,8 +255,10 @@ async function appendPendingMedia(cfg, phone, mediaId) {
   if (!r.ok) throw new Error('append failed');
 }
 
+const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_kind,welcome_text,welcome_media_id';
+
 async function getStoreById(cfg, id) {
-  const r = await fetch(`${cfg.url}/rest/v1/stores?id=eq.${id}&select=id,name,status,merchant_code`, {
+  const r = await fetch(`${cfg.url}/rest/v1/stores?id=eq.${id}&select=${STORE_FIELDS}`, {
     headers: sbHeaders(cfg.key),
   });
   const rows = await r.json();
@@ -255,7 +268,7 @@ async function getStoreById(cfg, id) {
 async function getStoreByPhone(cfg, from) {
   const local = from.length > 8 && from.startsWith('222') ? from.slice(3) : from;
   const r = await fetch(
-    `${cfg.url}/rest/v1/stores?phone=in.(${from},${local})&select=id,name,status,merchant_code,replies_quota,replies_used`,
+    `${cfg.url}/rest/v1/stores?phone=in.(${from},${local})&select=${STORE_FIELDS}`,
     { headers: sbHeaders(cfg.key) }
   );
   const rows = await r.json();
@@ -264,9 +277,26 @@ async function getStoreByPhone(cfg, from) {
 
 async function getStoreByCode(cfg, code) {
   const r = await fetch(
-    `${cfg.url}/rest/v1/stores?merchant_code=eq.${code}&select=id,name,status,merchant_code`,
+    `${cfg.url}/rest/v1/stores?merchant_code=eq.${code}&select=${STORE_FIELDS}`,
     { headers: sbHeaders(cfg.key) }
   );
+  const rows = await r.json();
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
+async function patchStore(cfg, id, patch) {
+  const r = await fetch(`${cfg.url}/rest/v1/stores?id=eq.${id}`, {
+    method: 'PATCH',
+    headers: { ...sbHeaders(cfg.key), Prefer: 'return=minimal' },
+    body: JSON.stringify(patch),
+  });
+  if (!r.ok) throw new Error('store update failed');
+}
+
+async function getMediaRow(cfg, id) {
+  const r = await fetch(`${cfg.url}/rest/v1/media_files?id=eq.${id}&select=kind,storage_path`, {
+    headers: sbHeaders(cfg.key),
+  });
   const rows = await r.json();
   return Array.isArray(rows) && rows[0] ? rows[0] : null;
 }
@@ -400,26 +430,30 @@ async function saveReplyIds(cfg, replyId, ids) {
   if (!pr.ok) throw new Error('edit failed');
 }
 
-// إرسال ملف صوت أو صورة أو فيديو من الرسائل الإدارية
-async function sendBotMedia(cfg, phoneNumberId, to, bm, caption) {
+async function signLink(cfg, path, seconds) {
   const sr = await fetch(
-    `${cfg.url}/storage/v1/object/sign/${BUCKET}/${encodeURI(bm.path)}`,
+    `${cfg.url}/storage/v1/object/sign/${BUCKET}/${encodeURI(path)}`,
     {
       method: 'POST',
       headers: sbHeaders(cfg.key),
-      body: JSON.stringify({ expiresIn: 600 }),
+      body: JSON.stringify({ expiresIn: seconds }),
     }
   );
   const sd = await sr.json();
   if (!sr.ok || !sd.signedURL) {
-    console.error('bot media sign failed', JSON.stringify(sd).slice(0, 200));
-    return false;
+    console.error('sign failed', JSON.stringify(sd).slice(0, 200));
+    return null;
   }
+  return `${cfg.url}/storage/v1${sd.signedURL}`;
+}
 
-  const link = `${cfg.url}/storage/v1${sd.signedURL}`;
-  const type = bm.kind;
+// إرسال ملف (صوت أو صورة أو فيديو) مع تعليق اختياري للصورة والفيديو
+async function sendMediaTo(cfg, phoneNumberId, to, kind, path, caption) {
+  const link = await signLink(cfg, path, 600);
+  if (!link) return false;
+  const type = kind === 'audio' ? 'audio' : kind === 'image' ? 'image' : 'video';
   const media = { link };
-  if (type !== 'audio' && caption) media.caption = caption.slice(0, 1024);
+  if (type !== 'audio' && caption) media.caption = String(caption).slice(0, 1024);
 
   const r = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
     method: 'POST',
@@ -427,24 +461,41 @@ async function sendBotMedia(cfg, phoneNumberId, to, bm, caption) {
     body: JSON.stringify({ messaging_product: 'whatsapp', to, type, [type]: media }),
   });
   if (!r.ok) {
-    console.error('bot media send failed', r.status, (await r.text()).slice(0, 200));
+    console.error('media send failed', r.status, (await r.text()).slice(0, 200));
     return false;
   }
   return true;
 }
 
-// كل رسالة نصية للبوت تمر من هنا: إن كان لها ملف مرفق نرسله بدلاً من النص
-async function sendText(cfg, phoneNumberId, to, body) {
-  const key = MSG_KEY_BY_TEXT.get(body);
-  const bm = key ? BOT_MEDIA[key] : null;
-  if (bm && await sendBotMedia(cfg, phoneNumberId, to, bm, body)) return;
-
+async function sendRaw(cfg, phoneNumberId, to, body) {
   const r = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body } }),
   });
   if (!r.ok) console.error('send failed', r.status, (await r.text()).slice(0, 200));
+}
+
+// كل رسالة نصية للبوت تمر من هنا: إن كان لها ملف مرفق من الإدارة نرسله بدلاً منها
+async function sendText(cfg, phoneNumberId, to, body) {
+  const key = MSG_KEY_BY_TEXT.get(body);
+  const bm = key ? BOT_MEDIA[key] : null;
+  if (bm && await sendMediaTo(cfg, phoneNumberId, to, bm.kind, bm.path, body)) return;
+  return sendRaw(cfg, phoneNumberId, to, body);
+}
+
+// رسالة الترحيب التي يحددها التاجر: صوت أو صورة أو فيديو أو نص
+async function sendWelcome(cfg, phoneNumberId, to, store) {
+  if (store.welcome_kind && store.welcome_kind !== 'text' && store.welcome_media_id) {
+    const mf = await getMediaRow(cfg, store.welcome_media_id);
+    if (mf && await sendMediaTo(cfg, phoneNumberId, to, mf.kind, mf.storage_path, store.welcome_text)) {
+      return;
+    }
+  }
+  if (store.welcome_kind === 'text' && store.welcome_text) {
+    return sendRaw(cfg, phoneNumberId, to, store.welcome_text);
+  }
+  return sendText(cfg, phoneNumberId, to, MSG.customerStoreSet(store.name));
 }
 
 async function sendReplyList(cfg, phoneNumberId, from, storeId) {
@@ -465,6 +516,10 @@ async function sendReplyList(cfg, phoneNumberId, from, storeId) {
     '❌ أو *إلغاء* للخروج';
 
   return sendText(cfg, phoneNumberId, from, body);
+}
+
+async function sendMediaReply(cfg, phoneNumberId, to, kind, mediaRow) {
+  await sendMediaTo(cfg, phoneNumberId, to, kind, mediaRow.storage_path, null);
 }
 
 async function sendEditMenu(cfg, phoneNumberId, from, replyId) {
@@ -531,37 +586,9 @@ async function sendReply(cfg, phoneNumberId, to, row) {
     return;
   }
 
-  const mr = await fetch(
-    `${cfg.url}/rest/v1/media_files?id=eq.${row.media_id}&select=kind,storage_path`,
-    { headers: sbHeaders(cfg.key) }
-  );
-  const [mf] = await mr.json();
+  const mf = await getMediaRow(cfg, row.media_id);
   if (!mf) return;
   return sendMediaReply(cfg, phoneNumberId, to, mf.kind, mf);
-}
-
-async function sendMediaReply(cfg, phoneNumberId, to, kind, mediaRow) {
-  const sr = await fetch(
-    `${cfg.url}/storage/v1/object/sign/${BUCKET}/${encodeURI(mediaRow.storage_path)}`,
-    {
-      method: 'POST',
-      headers: sbHeaders(cfg.key),
-      body: JSON.stringify({ expiresIn: 300 }),
-    }
-  );
-  const sd = await sr.json();
-  if (!sr.ok || !sd.signedURL) {
-    console.error('sign failed', JSON.stringify(sd).slice(0, 200));
-    return;
-  }
-  const link = `${cfg.url}/storage/v1${sd.signedURL}`;
-  const type = kind === 'audio' ? 'audio' : kind === 'image' ? 'image' : 'video';
-  const r = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messaging_product: 'whatsapp', to, type, [type]: { link } }),
-  });
-  if (!r.ok) console.error('media send failed', r.status, (await r.text()).slice(0, 200));
 }
 
 async function storeIncomingMedia(cfg, store, msg, type) {
@@ -685,6 +712,37 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     await resetSession(cfg, from, 'await_edit_keyword');
     await sendReplyList(cfg, phoneNumberId, from, store.id);
     return sendText(cfg, phoneNumberId, from, MSG.editPrompt);
+  }
+
+  if (cmd === WELCOME_CMD) {
+    await resetSession(cfg, from, 'await_welcome');
+    return sendText(cfg, phoneNumberId, from, MSG.welcomeAsk);
+  }
+
+  if (cmd === WELCOME_DEL_CMD) {
+    await patchStore(cfg, store.id, { welcome_kind: 'text', welcome_text: null, welcome_media_id: null });
+    return sendText(cfg, phoneNumberId, from, MSG.welcomeRemoved);
+  }
+
+  // رسالة الترحيب: نص أو ملف يرسله التاجر بعد كتابة "ترحيب"
+  if (session.state === 'await_welcome' && (isMedia || (type === 'text' && text && cmd !== DONE_CMD))) {
+    if (isMedia) {
+      try {
+        const mediaId = await storeIncomingMedia(cfg, store, msg, type);
+        const caption = msg[type]?.caption || null;
+        await patchStore(cfg, store.id, { welcome_kind: type, welcome_media_id: mediaId, welcome_text: caption });
+      } catch (err) {
+        console.error('welcome media error:', err?.message || err);
+        return sendText(cfg, phoneNumberId, from, MSG.mediaFailed(err?.message || 'خطأ غير معروف'));
+      }
+    } else {
+      if (text.length > TEXT_MAX) {
+        return sendText(cfg, phoneNumberId, from, MSG.textTooLong);
+      }
+      await patchStore(cfg, store.id, { welcome_kind: 'text', welcome_text: text, welcome_media_id: null });
+    }
+    await resetSession(cfg, from);
+    return sendText(cfg, phoneNumberId, from, MSG.welcomeSaved);
   }
 
   if (isMedia) {
@@ -814,12 +872,8 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   } else {
     const ids = fresh.pending_media_ids.slice(0, ALBUM_MAX);
     if (ids.length === 1) {
-      const mr = await fetch(
-        `${cfg.url}/rest/v1/media_files?id=eq.${ids[0]}&select=kind`,
-        { headers: sbHeaders(cfg.key) }
-      );
-      const [mf] = await mr.json();
-      row = { store_id: store.id, keywords, kind: mf.kind, content: null, media_id: ids[0] };
+      const mf = await getMediaRow(cfg, ids[0]);
+      row = { store_id: store.id, keywords, kind: mf ? mf.kind : 'image', content: null, media_id: ids[0] };
     } else {
       row = { store_id: store.id, keywords, kind: 'album', content: null, media_id: null, media_ids: ids };
     }
@@ -860,7 +914,7 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
       return sendText(cfg, phoneNumberId, from, MSG.codeInvalid);
     }
     await setSession(cfg, from, { state: 'customer', active_store_id: store.id });
-    return sendText(cfg, phoneNumberId, from, MSG.customerStoreSet(store.name));
+    return sendWelcome(cfg, phoneNumberId, from, store);
   }
 
   if (session.active_store_id) {
@@ -881,7 +935,6 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
 }
 
 async function handleMessage(cfg, phoneNumberId, msg) {
-  // نحمّل الرسائل المعدّلة (نص ونوع وملف) قبل أي رد
   await loadBotMessages(cfg);
 
   const from = String(msg.from || '');
