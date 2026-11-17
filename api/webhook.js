@@ -162,16 +162,30 @@ const MSG = {
   filesStoredInEditKeyword: '✏️ اختر رقم الرد أولاً، ثم أرسل الملفات.',
 };
 
-// تحميل الرسائل المعدّلة من قاعدة البيانات، وتطبيقها فوق الرسائل الأصلية
+// الرسائل المعدّلة من الإدارة: النوع والملف ونص الرسالة
+const BOT_MEDIA = {};
+let MSG_KEY_BY_TEXT = new Map();
+
 async function loadBotMessages(cfg) {
   try {
-    const r = await fetch(`${cfg.url}/rest/v1/bot_messages?select=key,value`, {
+    const r = await fetch(`${cfg.url}/rest/v1/bot_messages?select=key,value,kind,media_path`, {
       headers: sbHeaders(cfg.key),
     });
     const rows = await r.json();
     if (!Array.isArray(rows)) return;
+
     for (const row of rows) {
       if (typeof MSG[row.key] === 'string' && row.value) MSG[row.key] = row.value;
+      if (row.kind && row.kind !== 'text' && row.media_path) {
+        BOT_MEDIA[row.key] = { kind: row.kind, path: row.media_path };
+      } else {
+        delete BOT_MEDIA[row.key];
+      }
+    }
+
+    MSG_KEY_BY_TEXT = new Map();
+    for (const k of Object.keys(MSG)) {
+      if (typeof MSG[k] === 'string') MSG_KEY_BY_TEXT.set(MSG[k], k);
     }
   } catch (err) {
     console.error('bot messages load failed:', err?.message || err);
@@ -386,7 +400,45 @@ async function saveReplyIds(cfg, replyId, ids) {
   if (!pr.ok) throw new Error('edit failed');
 }
 
+// إرسال ملف صوت أو صورة أو فيديو من الرسائل الإدارية
+async function sendBotMedia(cfg, phoneNumberId, to, bm, caption) {
+  const sr = await fetch(
+    `${cfg.url}/storage/v1/object/sign/${BUCKET}/${encodeURI(bm.path)}`,
+    {
+      method: 'POST',
+      headers: sbHeaders(cfg.key),
+      body: JSON.stringify({ expiresIn: 600 }),
+    }
+  );
+  const sd = await sr.json();
+  if (!sr.ok || !sd.signedURL) {
+    console.error('bot media sign failed', JSON.stringify(sd).slice(0, 200));
+    return false;
+  }
+
+  const link = `${cfg.url}/storage/v1${sd.signedURL}`;
+  const type = bm.kind;
+  const media = { link };
+  if (type !== 'audio' && caption) media.caption = caption.slice(0, 1024);
+
+  const r = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messaging_product: 'whatsapp', to, type, [type]: media }),
+  });
+  if (!r.ok) {
+    console.error('bot media send failed', r.status, (await r.text()).slice(0, 200));
+    return false;
+  }
+  return true;
+}
+
+// كل رسالة نصية للبوت تمر من هنا: إن كان لها ملف مرفق نرسله بدلاً من النص
 async function sendText(cfg, phoneNumberId, to, body) {
+  const key = MSG_KEY_BY_TEXT.get(body);
+  const bm = key ? BOT_MEDIA[key] : null;
+  if (bm && await sendBotMedia(cfg, phoneNumberId, to, bm, body)) return;
+
   const r = await fetch(`${GRAPH}/${phoneNumberId}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
@@ -829,7 +881,7 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
 }
 
 async function handleMessage(cfg, phoneNumberId, msg) {
-  // نحمّل الرسائل المعدّلة قبل أي رد
+  // نحمّل الرسائل المعدّلة (نص ونوع وملف) قبل أي رد
   await loadBotMessages(cfg);
 
   const from = String(msg.from || '');
