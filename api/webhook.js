@@ -235,6 +235,20 @@ async function setSession(cfg, phone, patch) {
   if (!r.ok) throw new Error('session save failed');
 }
 
+// يحجز حالة انتظار الترحيب بشكل ذري: الطلب الأول فقط ينجح، والبقية تُتجاهل
+async function claimWelcome(cfg, phone) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/wa_sessions?phone=eq.${phone}&state=eq.await_welcome`,
+    {
+      method: 'PATCH',
+      headers: { ...sbHeaders(cfg.key), Prefer: 'return=representation' },
+      body: JSON.stringify({ state: 'idle', updated_at: new Date().toISOString() }),
+    }
+  );
+  const rows = await r.json().catch(() => []);
+  return Array.isArray(rows) && rows.length > 0;
+}
+
 async function resetSession(cfg, phone, state = 'idle') {
   await setSession(cfg, phone, {
     state,
@@ -724,8 +738,11 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.welcomeRemoved);
   }
 
-  // رسالة الترحيب: نص أو ملف يرسله التاجر بعد كتابة "ترحيب"
+  // رسالة الترحيب: الطلب الأول فقط يحجز الحالة وينفذ، والبقية تُتجاهل بصمت
   if (session.state === 'await_welcome' && (isMedia || (type === 'text' && text && cmd !== DONE_CMD))) {
+    const won = await claimWelcome(cfg, from);
+    if (!won) return;
+
     if (isMedia) {
       try {
         const mediaId = await storeIncomingMedia(cfg, store, msg, type);
@@ -733,15 +750,16 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
         await patchStore(cfg, store.id, { welcome_kind: type, welcome_media_id: mediaId, welcome_text: caption });
       } catch (err) {
         console.error('welcome media error:', err?.message || err);
+        await setSession(cfg, from, { state: 'await_welcome' });
         return sendText(cfg, phoneNumberId, from, MSG.mediaFailed(err?.message || 'خطأ غير معروف'));
       }
     } else {
       if (text.length > TEXT_MAX) {
+        await setSession(cfg, from, { state: 'await_welcome' });
         return sendText(cfg, phoneNumberId, from, MSG.textTooLong);
       }
       await patchStore(cfg, store.id, { welcome_kind: 'text', welcome_text: text, welcome_media_id: null });
     }
-    await resetSession(cfg, from);
     return sendText(cfg, phoneNumberId, from, MSG.welcomeSaved);
   }
 
