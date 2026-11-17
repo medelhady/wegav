@@ -99,11 +99,20 @@ const MSG = {
     'الإجمالي: *' + quota + '* رد',
   welcomeAsk:
     '🎉 *رسالة الترحيب*\n\n' +
-    'أرسل الآن الرسالة التي يستقبلها الزبون عند دخول متجرك:\n' +
+    'أرسل الآن كل ما تريد أن يستقبله الزبون عند دخول متجرك:\n' +
     '• نص مكتوب\n' +
-    '• أو صورة، أو صوت، أو فيديو (ويمكنك كتابة تعليق مع الصورة أو الفيديو)\n\n' +
+    '• صور أو صوت أو فيديو (يمكنك إرسال عدة ملفات)\n\n' +
+    'عند الانتهاء اكتب *تم* للحفظ.\n' +
     'للتراجع اكتب *إلغاء*، ولحذفها اكتب *حذف الترحيب*.',
-  welcomeSaved: '✅ *تم حفظ رسالة الترحيب*\n\nستصل للزبائن عند إدخال كود متجرك.',
+  welcomeTextReceived:
+    '✅ *تم استلام النص*\n\n' +
+    'أرسل الصور أو الصوت أو الفيديو إن أردت، ثم اكتب *تم* للحفظ.',
+  welcomeEmpty: '📎 لم ترسل شيئاً بعد.\nأرسل نصاً أو ملفات، ثم اكتب *تم*.',
+  welcomeSaved: (count, hasText) =>
+    '✅ *تم حفظ رسالة الترحيب*\n\n' +
+    (hasText ? '📝 نص\n' : '') +
+    (count ? '📎 ' + count + ' ملف\n' : '') +
+    '\nستصل للزبائن عند إدخال كود متجرك بالترتيب نفسه.',
   welcomeRemoved: '🗑 *تم حذف رسالة الترحيب*\n\nسيستقبل الزبائن الرسالة الافتراضية.',
   addStart:
     '➕ *إضافة رد جديد*\n\n' +
@@ -154,8 +163,8 @@ const MSG = {
     '❌ *إلغاء* ← الخروج بدون حفظ\n' +
     '━━━━━━━━━━━━',
   editItemDeleted: (index) => '🗑 تم حذف العنصر رقم ' + index + '.',
-  editLastItem: '⚠️ لا يمكن حذف آخر ملف في الرد.\nأضف ملفاً جديداً أولاً، ثم احذف هذا.',
   editIndexInvalid: (max) => '⚠️ رقم غير صحيح. اختر رقماً من 1 إلى ' + max + '.',
+  editLastItem: '⚠️ لا يمكن حذف آخر ملف في الرد.\nأضف ملفاً جديداً أولاً، ثم احذف هذا.',
   editLimit: (max, current, added) =>
     '⚠️ *تجاوزت الحد الأقصى (' + max + ' ملفات)*\n\n' +
     'الحالية: ' + current + '\nالجديدة: ' + added + '\n\n' +
@@ -235,20 +244,6 @@ async function setSession(cfg, phone, patch) {
   if (!r.ok) throw new Error('session save failed');
 }
 
-// يحجز حالة انتظار الترحيب بشكل ذري: الطلب الأول فقط ينجح، والبقية تُتجاهل
-async function claimWelcome(cfg, phone) {
-  const r = await fetch(
-    `${cfg.url}/rest/v1/wa_sessions?phone=eq.${phone}&state=eq.await_welcome`,
-    {
-      method: 'PATCH',
-      headers: { ...sbHeaders(cfg.key), Prefer: 'return=representation' },
-      body: JSON.stringify({ state: 'idle', updated_at: new Date().toISOString() }),
-    }
-  );
-  const rows = await r.json().catch(() => []);
-  return Array.isArray(rows) && rows.length > 0;
-}
-
 async function resetSession(cfg, phone, state = 'idle') {
   await setSession(cfg, phone, {
     state,
@@ -269,7 +264,7 @@ async function appendPendingMedia(cfg, phone, mediaId) {
   if (!r.ok) throw new Error('append failed');
 }
 
-const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_kind,welcome_text,welcome_media_id';
+const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_text,welcome_media_ids';
 
 async function getStoreById(cfg, id) {
   const r = await fetch(`${cfg.url}/rest/v1/stores?id=eq.${id}&select=${STORE_FIELDS}`, {
@@ -461,7 +456,6 @@ async function signLink(cfg, path, seconds) {
   return `${cfg.url}/storage/v1${sd.signedURL}`;
 }
 
-// إرسال ملف (صوت أو صورة أو فيديو) مع تعليق اختياري للصورة والفيديو
 async function sendMediaTo(cfg, phoneNumberId, to, kind, path, caption) {
   const link = await signLink(cfg, path, 600);
   if (!link) return false;
@@ -490,7 +484,6 @@ async function sendRaw(cfg, phoneNumberId, to, body) {
   if (!r.ok) console.error('send failed', r.status, (await r.text()).slice(0, 200));
 }
 
-// كل رسالة نصية للبوت تمر من هنا: إن كان لها ملف مرفق من الإدارة نرسله بدلاً منها
 async function sendText(cfg, phoneNumberId, to, body) {
   const key = MSG_KEY_BY_TEXT.get(body);
   const bm = key ? BOT_MEDIA[key] : null;
@@ -498,18 +491,30 @@ async function sendText(cfg, phoneNumberId, to, body) {
   return sendRaw(cfg, phoneNumberId, to, body);
 }
 
-// رسالة الترحيب التي يحددها التاجر: صوت أو صورة أو فيديو أو نص
+// رسالة الترحيب: نصها أولاً، ثم جميع ملفاتها بالترتيب الذي رفعها به التاجر
 async function sendWelcome(cfg, phoneNumberId, to, store) {
-  if (store.welcome_kind && store.welcome_kind !== 'text' && store.welcome_media_id) {
-    const mf = await getMediaRow(cfg, store.welcome_media_id);
-    if (mf && await sendMediaTo(cfg, phoneNumberId, to, mf.kind, mf.storage_path, store.welcome_text)) {
-      return;
-    }
+  const ids = store.welcome_media_ids || [];
+  if (ids.length === 0 && !store.welcome_text) {
+    return sendText(cfg, phoneNumberId, to, MSG.customerStoreSet(store.name));
   }
-  if (store.welcome_kind === 'text' && store.welcome_text) {
-    return sendRaw(cfg, phoneNumberId, to, store.welcome_text);
+
+  if (store.welcome_text) {
+    await sendRaw(cfg, phoneNumberId, to, store.welcome_text);
   }
-  return sendText(cfg, phoneNumberId, to, MSG.customerStoreSet(store.name));
+  if (ids.length === 0) return;
+
+  const r = await fetch(
+    `${cfg.url}/rest/v1/media_files?id=in.(${ids.join(',')})&select=id,kind,storage_path`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const files = await r.json();
+  if (!Array.isArray(files)) return;
+
+  const byId = new Map(files.map(f => [f.id, f]));
+  for (const id of ids) {
+    const mf = byId.get(id);
+    if (mf) await sendMediaTo(cfg, phoneNumberId, to, mf.kind, mf.storage_path, null);
+  }
 }
 
 async function sendReplyList(cfg, phoneNumberId, from, storeId) {
@@ -734,33 +739,45 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   }
 
   if (cmd === WELCOME_DEL_CMD) {
-    await patchStore(cfg, store.id, { welcome_kind: 'text', welcome_text: null, welcome_media_id: null });
+    await patchStore(cfg, store.id, { welcome_text: null, welcome_media_ids: [] });
     return sendText(cfg, phoneNumberId, from, MSG.welcomeRemoved);
   }
 
-  // رسالة الترحيب: الطلب الأول فقط يحجز الحالة وينفذ، والبقية تُتجاهل بصمت
-  if (session.state === 'await_welcome' && (isMedia || (type === 'text' && text && cmd !== DONE_CMD))) {
-    const won = await claimWelcome(cfg, from);
-    if (!won) return;
+  // وضع الترحيب: نجمع النص والملفات، و"تم" يحفظ الكل دفعة واحدة
+  if (session.state === 'await_welcome') {
+    if (cmd === DONE_CMD) {
+      const fresh = await getSession(cfg, from);
+      const ids = (fresh.pending_media_ids || []).slice(0, ALBUM_MAX);
+      const pendingText = fresh.pending_text || null;
+
+      if (!pendingText && ids.length === 0) {
+        return sendText(cfg, phoneNumberId, from, MSG.welcomeEmpty);
+      }
+
+      await patchStore(cfg, store.id, { welcome_text: pendingText, welcome_media_ids: ids });
+      await resetSession(cfg, from);
+      return sendText(cfg, phoneNumberId, from, MSG.welcomeSaved(ids.length, Boolean(pendingText)));
+    }
 
     if (isMedia) {
       try {
         const mediaId = await storeIncomingMedia(cfg, store, msg, type);
-        const caption = msg[type]?.caption || null;
-        await patchStore(cfg, store.id, { welcome_kind: type, welcome_media_id: mediaId, welcome_text: caption });
+        await appendPendingMedia(cfg, from, mediaId);
       } catch (err) {
         console.error('welcome media error:', err?.message || err);
-        await setSession(cfg, from, { state: 'await_welcome' });
         return sendText(cfg, phoneNumberId, from, MSG.mediaFailed(err?.message || 'خطأ غير معروف'));
       }
-    } else {
+      return;
+    }
+
+    if (type === 'text' && text) {
       if (text.length > TEXT_MAX) {
-        await setSession(cfg, from, { state: 'await_welcome' });
         return sendText(cfg, phoneNumberId, from, MSG.textTooLong);
       }
-      await patchStore(cfg, store.id, { welcome_kind: 'text', welcome_text: text, welcome_media_id: null });
+      await setSession(cfg, from, { pending_text: text });
+      return sendText(cfg, phoneNumberId, from, MSG.welcomeTextReceived);
     }
-    return sendText(cfg, phoneNumberId, from, MSG.welcomeSaved);
+    return;
   }
 
   if (isMedia) {
