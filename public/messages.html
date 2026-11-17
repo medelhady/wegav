@@ -12,12 +12,17 @@ h1{font-size:18px;margin:0 0 4px}
 .sub{font-size:13px;color:#666}
 input[type=password]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-size:15px}
 textarea{width:100%;min-height:110px;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-family:inherit;font-size:14px;resize:vertical}
-.btn{background:#1a73e8;color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;margin-top:8px}
+select{padding:8px;border:1px solid #ccc;border-radius:8px;font-size:14px;margin-top:8px}
+.btn{background:#1a73e8;color:#fff;border:0;border-radius:8px;padding:8px 14px;cursor:pointer;font-size:13px;font-weight:600;margin:8px 6px 0 0}
 .btn.gray{background:#fff;color:#333;border:1px solid #ccc}
+.btn.red{background:#fff;color:#d93025;border:1px solid #f1b3ad}
 .btn:disabled{opacity:.5;cursor:wait}
-.label{font-weight:700;font-size:15px;margin-bottom:6px}
+.label{font-weight:700;font-size:15px;margin-bottom:4px}
 .key{font-size:12px;color:#999;direction:ltr;text-align:right}
 .changed{font-size:12px;color:#b06000;margin-top:4px}
+.media{background:#f7f9fc;border:1px dashed #cdd6e4;border-radius:10px;padding:12px;margin-top:10px;font-size:13px}
+.media .fname{direction:ltr;text-align:right;color:#444;margin:6px 0;word-break:break-all}
+.hint{font-size:12px;color:#777;line-height:1.7}
 #msg{font-size:13px;margin-top:8px;min-height:18px}
 .ok{color:#188038}.err{color:#d93025}
 .hidden{display:none}
@@ -39,8 +44,10 @@ textarea{width:100%;min-height:110px;padding:10px;border:1px solid #ccc;border-r
   <div id="app" class="hidden">
     <div class="card">
       <h1>رسائل البوت</h1>
-      <div class="sub">عدّل النص ثم اضغط حفظ. التغيير يظهر في البوت فوراً.<br>
-      استخدم <b>*نص*</b> لجعل الكلام عريضاً، وسطر جديد لكل فقرة.</div>
+      <div class="sub">
+        اختر نوع كل رسالة: نص أو صوت أو صورة أو فيديو، ثم عدّل النص أو ارفع الملف.<br>
+        عند اختيار صوت يرسل البوت الملف الصوتي بدل النص، وعند اختيار صورة أو فيديو يصبح النص تعليقاً تحته.
+      </div>
       <div id="msg"></div>
     </div>
     <div id="list"></div>
@@ -52,6 +59,15 @@ textarea{width:100%;min-height:110px;padding:10px;border:1px solid #ccc;border-r
 let password = sessionStorage.getItem('admin_pass') || '';
 let items = [];
 const $ = id => document.getElementById(id);
+
+const KIND_LABEL = { text: 'نص', audio: 'صوت', image: 'صورة', video: 'فيديو' };
+const KIND_HINT = {
+  audio: 'الصيغة المناسبة: OGG أو MP3. يُرسل كملاحظة صوتية بدون نص.',
+  image: 'الصيغة المناسبة: JPG أو PNG. النص يظهر كتعليق تحت الصورة.',
+  video: 'الصيغة المناسبة: MP4. النص يظهر كتعليق تحت الفيديو.',
+};
+const ACCEPT = { audio: 'audio/*', image: 'image/*', video: 'video/*' };
+const LIMIT = 4 * 1024 * 1024;
 
 function show(text, cls) {
   const m = $('msg');
@@ -74,9 +90,32 @@ async function api(method, body) {
   return data;
 }
 
+async function uploadFile(file, key, kind) {
+  const ext = (file.name.split('.').pop() || 'bin').toLowerCase();
+  const res = await fetch('/api/botmsg', {
+    method: 'POST',
+    headers: {
+      'Content-Type': file.type || 'application/octet-stream',
+      'X-Admin-Password': password,
+      'X-Msg-Key': key,
+      'X-Media-Kind': kind,
+      'X-File-Ext': ext,
+    },
+    body: file,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+  return data;
+}
+
+function baseName(path) {
+  return path ? String(path).split('/').pop() : '';
+}
+
 function render() {
   const box = $('list');
   box.innerHTML = '';
+
   items.forEach(it => {
     const card = document.createElement('div');
     card.className = 'card';
@@ -89,6 +128,16 @@ function render() {
     key.className = 'key';
     key.textContent = it.key;
 
+    const kindSel = document.createElement('select');
+    ['text', 'audio', 'image', 'video'].forEach(v => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = KIND_LABEL[v];
+      kindSel.appendChild(o);
+    });
+    kindSel.value = it.kind || 'text';
+    kindSel.addEventListener('change', () => changeKind(it, kindSel.value, kindSel));
+
     const ta = document.createElement('textarea');
     ta.value = it.value;
 
@@ -100,9 +149,70 @@ function render() {
     ta.addEventListener('input', refresh);
     refresh();
 
+    card.append(label, key, kindSel, ta, changed);
+
+    const curKind = it.kind || 'text';
+    if (curKind !== 'text') {
+      const media = document.createElement('div');
+      media.className = 'media';
+
+      const hint = document.createElement('div');
+      hint.className = 'hint';
+      hint.textContent = KIND_HINT[curKind];
+
+      const fname = document.createElement('div');
+      fname.className = 'fname';
+      fname.textContent = it.media_path ? 'الملف الحالي: ' + baseName(it.media_path) : 'لا يوجد ملف بعد';
+
+      const fileInput = document.createElement('input');
+      fileInput.type = 'file';
+      fileInput.accept = ACCEPT[curKind];
+      fileInput.className = 'hidden';
+      fileInput.addEventListener('change', async () => {
+        const file = fileInput.files[0];
+        fileInput.value = '';
+        if (!file) return;
+        if (file.size > LIMIT) return show('✗ الملف أكبر من 4 ميغابايت', 'err');
+        show('… جاري رفع الملف');
+        try {
+          await uploadFile(file, it.key, curKind);
+          show('✓ تم رفع الملف: ' + it.label, 'ok');
+          await load();
+        } catch (e) {
+          show('✗ فشل الرفع: ' + e.message, 'err');
+        }
+      });
+
+      const upBtn = document.createElement('button');
+      upBtn.className = 'btn';
+      upBtn.textContent = it.media_path ? 'تغيير الملف' : 'رفع الملف';
+      upBtn.addEventListener('click', () => fileInput.click());
+
+      media.append(hint, fname, upBtn, fileInput);
+
+      if (it.media_path) {
+        const rm = document.createElement('button');
+        rm.className = 'btn red';
+        rm.textContent = 'حذف الملف';
+        rm.addEventListener('click', async () => {
+          if (!confirm('حذف الملف؟ سيعود البوت لإرسال النص.')) return;
+          try {
+            await api('POST', { key: it.key, remove_media: true });
+            show('✓ تم حذف الملف', 'ok');
+            await load();
+          } catch (e) {
+            show('✗ فشل الحذف: ' + e.message, 'err');
+          }
+        });
+        media.appendChild(rm);
+      }
+
+      card.appendChild(media);
+    }
+
     const save = document.createElement('button');
     save.className = 'btn';
-    save.textContent = 'حفظ';
+    save.textContent = 'حفظ النص';
     save.addEventListener('click', async () => {
       save.disabled = true;
       try {
@@ -119,24 +229,32 @@ function render() {
 
     const restore = document.createElement('button');
     restore.className = 'btn gray';
-    restore.style.marginRight = '6px';
     restore.textContent = 'استعادة الأصل';
     restore.addEventListener('click', async () => {
-      if (!confirm('استعادة النص الأصلي؟')) return;
-      restore.disabled = true;
+      if (!confirm('استعادة النص الأصلي ونوع الرسالة نصاً؟ سيُحذف الملف المرفق.')) return;
       try {
         await api('POST', { key: it.key, restore: true });
-        await load();
         show('✓ تمت استعادة: ' + it.label, 'ok');
+        await load();
       } catch (e) {
         show('✗ فشل الاستعادة: ' + e.message, 'err');
-        restore.disabled = false;
       }
     });
 
-    card.append(label, key, ta, changed, save, restore);
+    card.append(save, restore);
     box.appendChild(card);
   });
+}
+
+async function changeKind(it, kind, sel) {
+  try {
+    await api('POST', { key: it.key, kind });
+    show('✓ تم تغيير النوع إلى: ' + KIND_LABEL[kind], 'ok');
+    await load();
+  } catch (e) {
+    show('✗ فشل التغيير: ' + e.message, 'err');
+    sel.value = it.kind || 'text';
+  }
 }
 
 async function load() {
