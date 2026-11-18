@@ -264,6 +264,16 @@ async function appendPendingMedia(cfg, phone, mediaId) {
   if (!r.ok) throw new Error('append failed');
 }
 
+// إضافة ملف للترحيب دون تغيير حالة الانتظار
+async function appendWelcomeMedia(cfg, phone, mediaId) {
+  const r = await fetch(`${cfg.url}/rest/v1/rpc/append_welcome_media`, {
+    method: 'POST',
+    headers: sbHeaders(cfg.key),
+    body: JSON.stringify({ p_phone: phone, p_media: mediaId }),
+  });
+  if (!r.ok) throw new Error('welcome append failed');
+}
+
 const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_text,welcome_media_ids';
 
 async function getStoreById(cfg, id) {
@@ -762,7 +772,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     if (isMedia) {
       try {
         const mediaId = await storeIncomingMedia(cfg, store, msg, type);
-        await appendPendingMedia(cfg, from, mediaId);
+        await appendWelcomeMedia(cfg, from, mediaId);
       } catch (err) {
         console.error('welcome media error:', err?.message || err);
         return sendText(cfg, phoneNumberId, from, MSG.mediaFailed(err?.message || 'خطأ غير معروف'));
@@ -774,7 +784,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       if (text.length > TEXT_MAX) {
         return sendText(cfg, phoneNumberId, from, MSG.textTooLong);
       }
-      await setSession(cfg, from, { pending_text: text });
+      await setSession(cfg, from, { state: 'await_welcome', pending_text: text });
       return sendText(cfg, phoneNumberId, from, MSG.welcomeTextReceived);
     }
     return;
