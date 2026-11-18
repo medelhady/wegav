@@ -7,6 +7,7 @@ const KEYWORD_LEN_MAX = 60;
 const ALBUM_MAX = 10;
 const TRIAL_REPLIES = 50;
 const ACCESS_DAYS = 30;
+const TOPIC_MAX = 30;
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const MEDIA_TYPES = ['audio', 'image', 'video'];
 const IGNORED_TYPES = ['unsupported', 'reaction', 'sticker', 'system', 'unknown', 'order', 'contacts', 'location', 'interactive', 'button'];
@@ -53,7 +54,6 @@ const WELCOME_CMD = normalize('ترحيب');
 const WELCOME_DEL_CMD = normalize('حذف الترحيب');
 const LINK_CMD = normalize('رابط');
 const LEAVE_CMD = normalize('تغيير المتجر');
-const ACCESS_CMD = normalize('كود دخول');
 
 const MSG = {
   customerWelcome:
@@ -71,12 +71,13 @@ const MSG = {
     '🤔 *لم أفهم طلبك*\n\n' +
     'اكتب كلمة من كلمات المتجر، أو اكتب *تغيير المتجر* لإدخال كود آخر.',
   codeInvalid: '❌ *الكود غير صحيح أو المتجر غير متاح*\n\nتأكد من الكود وأعد المحاولة.',
-  accessGranted: (name, exp) =>
-    '🔓 *تم تفعيل الوصول الخاص*\n\n' +
+  accessGranted: (name, topic, exp) =>
+    '🔓 *تم فتح محتوى خاص*\n\n' +
     '🏪 ' + name + '\n' +
+    '📂 الموضوع: *' + topic + '*\n' +
     '📅 صالح حتى: ' + exp + '\n\n' +
     'اكتب كلمة الرد للحصول عليه.',
-  accessInvalid: '❌ *كود الدخول غير صحيح أو منتهي الصلاحية*',
+  accessInvalid: '❌ *الكود غير صحيح أو منتهي الصلاحية*',
   storeStopped: '⛔ *حسابك موقوف حالياً*\n\nتواصل مع الإدارة لإعادة التفعيل.',
   registerAskName:
     '✍️ *تسجيل متجر جديد*\n\n' +
@@ -98,17 +99,19 @@ const MSG = {
     'شارك هذا الرابط مع زبائنك، عند الضغط عليه يفتح المحادثة مع كود متجرك جاهزاً:\n\n' +
     'https://wa.me/' + BOT_NUMBER + '?text=' + store.merchant_code + '\n\n' +
     '🔑 كودك: *' + store.merchant_code + '*',
-  accessCreated: (code, exp, privCount) =>
-    '🔑 *كود الدخول الخاص*\n\n' +
+  accessCreated: (code, topic, exp) =>
+    '🔑 *كود دخول لموضوع: ' + topic + '*\n\n' +
     '*' + code + '*\n' +
     '📅 صالح حتى: ' + exp + ' (شهر)\n\n' +
-    (privCount
-      ? '🔒 يفتح ' + privCount + ' رداً خاصاً.'
-      : '⚠️ لا توجد ردود خاصة بعد. اكتب *خاص رقم* لجعل الرد خاصاً.') +
-    '\n\nأعط هذا الكود للزبون المختار، ليكتبه للبوت.',
-  privateToggled: (n, isPrivate) =>
-    (isPrivate ? '🔒 تم جعل الرد رقم ' + n + ' *خاصاً*' : '🔓 تم جعل الرد رقم ' + n + ' *عاماً*') +
-    '\n\nالردود الخاصة تظهر فقط لمن يملك كود الدخول.',
+    'أعطِ هذا الكود للزبون المختار ليكتبه للبوت.\n' +
+    'كل طلب جديد يعطي كوداً مختلفاً.',
+  accessRequestUsage: '✏️ اكتب: *كود دورة1* (اسم الموضوع)',
+  topicMissing: (topic) =>
+    '⚠️ لا يوجد رد خاص بموضوع *' + topic + '*.\n' +
+    'أنشئ رداً ثم اجعله خاصاً بكتابة *خاص رقم ' + topic + '*.',
+  privateSet: (n, topic) => '🔒 تم جعل الرد رقم ' + n + ' خاصاً بموضوع: *' + topic + '*',
+  publicSet: (n) => '🔓 تم جعل الرد رقم ' + n + ' *عاماً*',
+  privateUsage: '✏️ اكتب: *خاص 2 دورة1*\n(رقم الرد ثم اسم الموضوع)',
   menu: (store, used, quota) =>
     '📋 *قائمة التاجر*\n' +
     '━━━━━━━━━━━━\n' +
@@ -116,8 +119,9 @@ const MSG = {
     '➕ *إضافة* ← رد جديد\n' +
     '✏️ *تعديل* ← تعديل رد موجود\n' +
     '🗑 *حذف 2* ← حذف الرد رقم 2\n' +
-    '🔒 *خاص 2* ← جعل الرد رقم 2 خاصاً أو عاماً\n' +
-    '🔑 *كود دخول* ← كود خاص صالح لشهر\n' +
+    '🔒 *خاص 2 دورة1* ← جعل الرد رقم 2 خاصاً بموضوع\n' +
+    '🔓 *عام 2* ← جعل الرد رقم 2 عاماً\n' +
+    '🔑 *كود دورة1* ← كود دخول لهذا الموضوع\n' +
     '🔗 *رابط* ← رابط مشاركة لزبائنك\n' +
     '📊 *حصتي* ← الردود المستخدمة والمتبقية\n' +
     '❌ *إلغاء* ← الخروج من أي خطوة\n' +
@@ -377,20 +381,22 @@ async function createStore(cfg, phone, name) {
   });
 }
 
-// كود دخول خاص للزبائن، صالح لمدة شهر
+// كود دخول من 3 أحرف (يحتوي حرفاً على الأقل)، يختلف في كل طلب
 function randomAccessCode() {
-  let s = '';
-  for (let i = 0; i < 6; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
-  return s;
+  while (true) {
+    let s = '';
+    for (let i = 0; i < 3; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+    if (/[A-Z]/.test(s)) return s;
+  }
 }
 
-async function createAccessCode(cfg, storeId) {
+async function createAccessCode(cfg, storeId, topic) {
   const expires = new Date(Date.now() + ACCESS_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 30; i++) {
     const r = await fetch(`${cfg.url}/rest/v1/access_codes`, {
       method: 'POST',
       headers: { ...sbHeaders(cfg.key), Prefer: 'return=representation' },
-      body: JSON.stringify({ store_id: storeId, code: randomAccessCode(), expires_at: expires }),
+      body: JSON.stringify({ store_id: storeId, code: randomAccessCode(), topic, expires_at: expires }),
     });
     const d = await r.json();
     if (r.ok && Array.isArray(d) && d[0]) return d[0];
@@ -398,35 +404,46 @@ async function createAccessCode(cfg, storeId) {
   throw new Error('تعذر إنشاء كود الدخول');
 }
 
-async function getAccessCodeByCode(cfg, code) {
+async function getAccessByCode(cfg, code) {
   const r = await fetch(
-    `${cfg.url}/rest/v1/access_codes?code=eq.${code}&select=id,store_id,expires_at`,
+    `${cfg.url}/rest/v1/access_codes?code=eq.${code}&select=id,store_id,topic,expires_at`,
     { headers: sbHeaders(cfg.key) }
   );
   const rows = await r.json();
   return Array.isArray(rows) && rows[0] ? rows[0] : null;
 }
 
-// هل الزبون يملك كود دخول صالحاً لهذا المتجر الآن؟
-async function hasValidAccess(cfg, session) {
-  if (!session.access_code_id) return false;
+// الوصول النشط للزبون: نفس المتجر، ولم تنتهِ الصلاحية
+async function getActiveAccess(cfg, session) {
+  if (!session.access_code_id) return null;
   const r = await fetch(
-    `${cfg.url}/rest/v1/access_codes?id=eq.${session.access_code_id}&select=store_id,expires_at`,
+    `${cfg.url}/rest/v1/access_codes?id=eq.${session.access_code_id}&select=id,store_id,topic,expires_at`,
     { headers: sbHeaders(cfg.key) }
   );
   const rows = await r.json();
   const row = Array.isArray(rows) ? rows[0] : null;
-  if (!row) return false;
-  return row.store_id === session.active_store_id && new Date(row.expires_at).getTime() > Date.now();
+  if (!row) return null;
+  if (row.store_id !== session.active_store_id) return null;
+  if (new Date(row.expires_at).getTime() <= Date.now()) return null;
+  return row;
 }
 
-async function setReplyPrivate(cfg, id, value) {
+async function topicExists(cfg, storeId, topic) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&topic=eq.${encodeURIComponent(topic)}&select=id&limit=1`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const rows = await r.json();
+  return Array.isArray(rows) && rows.length > 0;
+}
+
+async function setReplyTopic(cfg, id, topic) {
   const r = await fetch(`${cfg.url}/rest/v1/auto_replies?id=eq.${id}`, {
     method: 'PATCH',
     headers: { ...sbHeaders(cfg.key), Prefer: 'return=minimal' },
-    body: JSON.stringify({ is_private: value }),
+    body: JSON.stringify({ topic, is_private: Boolean(topic) }),
   });
-  if (!r.ok) throw new Error('private update failed');
+  if (!r.ok) throw new Error('topic update failed');
 }
 
 async function findConflicts(cfg, storeId, keywords) {
@@ -444,17 +461,13 @@ async function findConflicts(cfg, storeId, keywords) {
   return [...hit];
 }
 
-// includePrivate = true يسمح بالبحث بين الردود الخاصة أيضاً
-async function findReplyForText(cfg, storeId, text, includePrivate = false) {
+// allowedTopic: 'ALL' لكل الردود (للتاجر)، وnull للزبون بلا كود، واسم الموضوع للزبون بكود
+async function findReplyForText(cfg, storeId, text, allowedTopic) {
   const cleaned = normalize(text);
-  const privFilter = includePrivate ? '' : '&is_private=eq.false';
-  const r = await fetch(
-    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}${privFilter}&select=id,keywords,kind,content,media_id,media_ids`,
-    { headers: sbHeaders(cfg.key) }
-  );
-  const rows = await r.json();
-  if (!Array.isArray(rows)) return null;
+  const rows = await listStoreReplies(cfg, storeId);
   for (const row of rows) {
+    const visible = allowedTopic === 'ALL' || !row.topic || row.topic === allowedTopic;
+    if (!visible) continue;
     if ((row.keywords || []).includes(cleaned)) return row;
   }
   return null;
@@ -462,7 +475,7 @@ async function findReplyForText(cfg, storeId, text, includePrivate = false) {
 
 async function listStoreReplies(cfg, storeId) {
   const r = await fetch(
-    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords,kind,content,media_id,media_ids,is_private,created_at&order=created_at.asc`,
+    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords,kind,content,media_id,media_ids,topic,created_at&order=created_at.asc`,
     { headers: sbHeaders(cfg.key) }
   );
   const rows = await r.json();
@@ -487,7 +500,7 @@ function replyLabel(row) {
   } else {
     kind = (row.kind === 'image' ? '🖼 ' : row.kind === 'audio' ? '🎤 ' : '🎬 ') + (KIND_AR[row.kind] || 'ملف');
   }
-  const lock = row.is_private ? '🔒 ' : '';
+  const lock = row.topic ? '🔒 ' + row.topic + ' | ' : '';
   return lock + '*' + kw + '*\n    ' + kind;
 }
 
@@ -627,7 +640,8 @@ async function sendReplyList(cfg, phoneNumberId, from, storeId) {
     '\n━━━━━━━━━━━━\n' +
     '✏️ اكتب *رقم* الرد للتعديل عليه\n' +
     '🗑 أو *حذف رقم* (مثال: حذف 2)\n' +
-    '🔒 أو *خاص رقم* لجعله خاصاً أو عاماً\n' +
+    '🔒 أو *خاص رقم موضوع* لجعله خاصاً\n' +
+    '🔓 أو *عام رقم* لجعله عاماً\n' +
     '❌ أو *إلغاء* للخروج';
 
   return sendText(cfg, phoneNumberId, from, body);
@@ -681,7 +695,7 @@ async function removeEditItem(cfg, phoneNumberId, from, session, index) {
   return sendEditMenu(cfg, phoneNumberId, from, session.edit_reply_id);
 }
 
-async function sendReply(cfg, phoneNumberId, to, row, includePrivate) {
+async function sendReply(cfg, phoneNumberId, to, row) {
   if (row.kind === 'text') return sendText(cfg, phoneNumberId, to, row.content);
 
   if (row.kind === 'album') {
@@ -794,6 +808,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
 
   const type = msg.type;
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
+  const spaced = text.replace(/\s+/g, ' ');
   const cmd = normalize(text);
   const cmdNoSpace = cmd.replace(/\s/g, '');
   const isMedia = MEDIA_TYPES.includes(type);
@@ -822,25 +837,44 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       MSG.quota(store.replies_used || 0, store.replies_quota || 0));
   }
 
-  // كود دخول خاص لشهر واحد
-  if (cmd === ACCESS_CMD) {
-    const ac = await createAccessCode(cfg, store.id);
-    const privCount = (await listStoreReplies(cfg, store.id)).filter(r => r.is_private).length;
+  // كود دورة1: يولّد كود دخول من 3 أحرف لهذا الموضوع
+  const codeM = spaced.match(/^كود (.+)$/);
+  if (codeM) {
+    const topic = codeM[1].trim().slice(0, TOPIC_MAX);
+    if (!topic) return sendText(cfg, phoneNumberId, from, MSG.accessRequestUsage);
+    if (!(await topicExists(cfg, store.id, topic))) {
+      return sendText(cfg, phoneNumberId, from, MSG.topicMissing(topic));
+    }
+    const ac = await createAccessCode(cfg, store.id, topic);
     const exp = new Date(ac.expires_at).toISOString().slice(0, 10);
-    return sendText(cfg, phoneNumberId, from, MSG.accessCreated(ac.code, exp, privCount));
+    return sendText(cfg, phoneNumberId, from, MSG.accessCreated(ac.code, topic, exp));
   }
 
-  // خاص رقم: يجعل الرد خاصاً أو عاماً
-  const pm = cmd.match(/^خاص (\d+)$/);
-  if (pm) {
+  // خاص 2 دورة1: يجعل الرد خاصاً بموضوع
+  const privM = spaced.match(/^خاص (\d+) (.+)$/);
+  if (privM) {
+    const n = parseInt(privM[1], 10);
+    const topic = privM[2].trim().slice(0, TOPIC_MAX);
     const list = await listStoreReplies(cfg, store.id);
-    const target = list[parseInt(pm[1], 10) - 1];
-    if (!target) {
-      return sendText(cfg, phoneNumberId, from, MSG.replyNumberNotFound);
-    }
-    const nv = !target.is_private;
-    await setReplyPrivate(cfg, target.id, nv);
-    return sendText(cfg, phoneNumberId, from, MSG.privateToggled(parseInt(pm[1], 10), nv));
+    const target = list[n - 1];
+    if (!target) return sendText(cfg, phoneNumberId, from, MSG.replyNumberNotFound);
+    await setReplyTopic(cfg, target.id, topic);
+    return sendText(cfg, phoneNumberId, from, MSG.privateSet(n, topic));
+  }
+
+  if (/^خاص \d+$/.test(spaced)) {
+    return sendText(cfg, phoneNumberId, from, MSG.privateUsage);
+  }
+
+  // عام 2: يجعل الرد عاماً
+  const pubM = spaced.match(/^عام (\d+)$/);
+  if (pubM) {
+    const n = parseInt(pubM[1], 10);
+    const list = await listStoreReplies(cfg, store.id);
+    const target = list[n - 1];
+    if (!target) return sendText(cfg, phoneNumberId, from, MSG.replyNumberNotFound);
+    await setReplyTopic(cfg, target.id, null);
+    return sendText(cfg, phoneNumberId, from, MSG.publicSet(n));
   }
 
   if (ADD_RE.test(cmdNoSpace)) {
@@ -963,7 +997,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
         return sendText(cfg, phoneNumberId, from, MSG.replyNumberNotFound);
       }
     } else {
-      row = await findReplyForText(cfg, store.id, text, true);
+      row = await findReplyForText(cfg, store.id, text, 'ALL');
       if (!row) {
         return sendText(cfg, phoneNumberId, from, MSG.replyNotFound);
       }
@@ -1068,7 +1102,7 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.storeLeft);
   }
 
-  // كود متجر من 3 أرقام
+  // كود متجر: 3 أرقام فقط
   if (/^\d{3}$/.test(text)) {
     const store = await getStoreByCode(cfg, text);
     if (!store || store.status !== 'active') {
@@ -1078,10 +1112,10 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendWelcome(cfg, phoneNumberId, from, store);
   }
 
-  // كود دخول خاص من 6 أحرف
-  const up = text.toUpperCase();
-  if (/^[A-Z0-9]{6}$/.test(up)) {
-    const ac = await getAccessCodeByCode(cfg, up);
+  // كود دخول خاص: 3 أحرف/أرقام، وفيه حرف على الأقل
+  const up = text.replace(/\s/g, '').toUpperCase();
+  if (/^[A-Z0-9]{3}$/.test(up) && /[A-Z]/.test(up)) {
+    const ac = await getAccessByCode(cfg, up);
     if (!ac || new Date(ac.expires_at).getTime() <= Date.now()) {
       return sendText(cfg, phoneNumberId, from, MSG.accessInvalid);
     }
@@ -1091,7 +1125,7 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     }
     await setSession(cfg, from, { state: 'customer', active_store_id: store.id, access_code_id: ac.id });
     return sendText(cfg, phoneNumberId, from,
-      MSG.accessGranted(store.name, new Date(ac.expires_at).toISOString().slice(0, 10)));
+      MSG.accessGranted(store.name, ac.topic, new Date(ac.expires_at).toISOString().slice(0, 10)));
   }
 
   if (session.active_store_id) {
@@ -1101,10 +1135,12 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
       return sendText(cfg, phoneNumberId, from, MSG.codeInvalid);
     }
 
-    const privateOk = await hasValidAccess(cfg, session);
+    // الزبون يرى العام، وخاص موضوعه فقط إن كان لديه كود نشط
+    const access = await getActiveAccess(cfg, session);
+    const allowed = access ? access.topic : null;
 
     if (type === 'text' && text) {
-      const row = await findReplyForText(cfg, store.id, text, privateOk);
+      const row = await findReplyForText(cfg, store.id, text, allowed);
       if (row) return sendReply(cfg, phoneNumberId, from, row);
     }
     return sendText(cfg, phoneNumberId, from, MSG.customerUnknown);
