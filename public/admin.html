@@ -148,7 +148,8 @@ function renderList() {
       'الهاتف: ' + (s.phone || '—') + '\n' +
       'الخطة: ' + (s.plan === 'paid' ? 'مدفوعة' : 'تجريبية') + ' | ' +
       'الردود: ' + s.replies_used + ' من ' + s.replies_quota + ' | ' +
-      'الانتهاء: ' + fmtDate(s.plan_expires_at);
+      'الانتهاء: ' + fmtDate(s.plan_expires_at) + '\n' +
+      'المحتوى الخاص: ' + (s.private_enabled ? 'مفعّل ✅' : 'موقوف ⛔');
     info.appendChild(meta);
 
     top.appendChild(info);
@@ -171,6 +172,13 @@ function renderList() {
     addBtn('إيقاف كامل', 'red', b => act(s.id, 'suspend', {}, b));
     addBtn('اشتراك شهري (500 رد)', '', b => act(s.id, 'paid', { quota: 500, months: 1 }, b));
     addBtn('تصفير الردود', 'gray', b => act(s.id, 'reset', {}, b));
+
+    if (s.private_enabled) {
+      addBtn('إيقاف الخاص', 'gray', b => act(s.id, 'private_off', {}, b));
+    } else {
+      addBtn('تفعيل الخاص', 'green', b => act(s.id, 'private_on', {}, b));
+    }
+
     addBtn('حذف الحساب', 'danger', () => toggleDelete(row, s));
 
     row.appendChild(actions);
