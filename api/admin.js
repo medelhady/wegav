@@ -3,15 +3,13 @@ function sbHeaders(key) {
 }
 
 async function sbDelete(url, key, path) {
-  const r = await fetch(`${url}${path}`, {
+  return fetch(`${url}${path}`, {
     method: 'DELETE',
     headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
   });
-  return r;
 }
 
 async function deleteStoreData(url, key, storeId) {
-  // 1) ملفات التخزين للمتجر
   const mr = await fetch(
     `${url}/rest/v1/media_files?store_id=eq.${storeId}&select=storage_path`,
     { headers: sbHeaders(key) }
@@ -28,7 +26,6 @@ async function deleteStoreData(url, key, storeId) {
     }
   }
 
-  // 2) حذف المتجر نفسه، والجداول المرتبطة تُحذف تلقائياً (on delete cascade)
   const r = await sbDelete(url, key, `/rest/v1/stores?id=eq.${storeId}`);
   if (!r.ok) {
     const text = await r.text();
@@ -54,7 +51,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
       const r = await fetch(
-        `${url}/rest/v1/stores?select=id,name,phone,merchant_code,status,plan,replies_quota,replies_used,plan_expires_at,created_at&order=created_at.desc`,
+        `${url}/rest/v1/stores?select=id,name,phone,merchant_code,status,plan,replies_quota,replies_used,plan_expires_at,private_enabled,created_at&order=created_at.desc`,
         { headers: sbHeaders(key) }
       );
       const data = await r.json();
@@ -68,7 +65,6 @@ export default async function handler(req, res) {
       if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'Invalid id' });
 
       if (action === 'delete') {
-        // تأكيد الحذف يجب أن يحمل اسم المتجر مكتوباً بالضبط
         const confirmName = String(body.confirm_name || '').trim();
         const sr = await fetch(
           `${url}/rest/v1/stores?id=eq.${id}&select=name`,
@@ -87,6 +83,8 @@ export default async function handler(req, res) {
       if (action === 'pause') patch = { status: 'paused' };
       else if (action === 'suspend') patch = { status: 'suspended' };
       else if (action === 'activate') patch = { status: 'active' };
+      else if (action === 'private_on') patch = { private_enabled: true };
+      else if (action === 'private_off') patch = { private_enabled: false };
       else if (action === 'paid') {
         const quota = Number(body.quota || 500);
         const months = Number(body.months || 1);
