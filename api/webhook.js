@@ -76,20 +76,21 @@ const MSG = {
     '🤔 *لم أفهم طلبك*\n\n' +
     'اكتب كلمة من كلمات المتجر، أو اكتب *تغيير المتجر* لإدخال كود آخر.',
   codeInvalid: '❌ *الكود غير صحيح أو المتجر غير متاح*\n\nتأكد من الكود وأعد المحاولة.',
-  accessGranted: (name, topic, exp) =>
+  accessGranted: (name, label, exp) =>
     '🔓 *تم فتح محتوى خاص*\n\n' +
     '🏪 ' + name + '\n' +
-    '📂 الموضوع: *' + topic + '*\n' +
+    '📂 النطاق: *' + label + '*\n' +
     '📅 صالح حتى: ' + exp + '\n\n' +
     'اكتب كلمة الرد للحصول عليه.',
   accessInvalid: '❌ *الكود غير صحيح أو منتهي الصلاحية*',
+  accessBoundOther: '⛔ *هذا الكود مرتبط برقم آخر*\n\nتواصل مع المتجر للحصول على كود خاص بك.',
   privateDisabled: '⛔ *ميزة المحتوى الخاص موقوفة لحسابك*\n\nتواصل مع الإدارة لتفعيلها.',
+  publicDisabled: '⛔ *الأكواد العامة غير مفعّلة لحسابك*\n\nتواصل مع الإدارة لتفعيلها.',
   storeStopped: '⛔ *حسابك موقوف حالياً*\n\nتواصل مع الإدارة لإعادة التفعيل.',
   customerSubscribed: '🔔 *تم تشغيل الإشعارات*\n\nستصلك إشعارات هذا المتجر عند إضافة الجديد.',
   customerUnsubscribed: '🔕 *تم إيقاف الإشعارات*\n\nاكتب *تشغيل الإشعارات* لإعادتها.',
   notifyNoStore: '⚠️ أدخل كود المتجر أولاً، ثم اكتب *إيقاف الإشعارات* أو *تشغيل الإشعارات*.',
   notifyHeader: (name) => '📢 *جديد في ' + name + '*\n\n',
-  notifyUsage: '📢 *إرسال إشعار*\n\nاكتب *إشعار 2* لإرسال الرد رقم 2 لجميع المشتركين.',
   notifyNoFeature: '⛔ *خاصية الإشعارات غير مفعلة لحسابك*\n\nتواصل مع الإدارة لتفعيلها.',
   notifyNoQuota: '⛔ *انتهت حصة الإشعارات لهذا الشهر*\n\nتواصل مع الإدارة لتجديدها.',
   notifyNoSubscribers: '📭 لا يوجد مشتركون يستقبلون هذا الإشعار بعد.',
@@ -117,13 +118,18 @@ const MSG = {
     'شارك هذا الرابط مع زبائنك، عند الضغط عليه يفتح المحادثة مع كود متجرك جاهزاً:\n\n' +
     'https://wa.me/' + BOT_NUMBER + '?text=' + store.merchant_code + '\n\n' +
     '🔑 كودك: *' + store.merchant_code + '*',
-  accessCreated: (code, topic, exp) =>
-    '🔑 *كود دخول لموضوع: ' + topic + '*\n\n' +
+  accessCreated: (code, label, exp, kind) =>
+    '🔑 *كود دخول: ' + label + '*\n\n' +
     '*' + code + '*\n' +
     '📅 صالح حتى: ' + exp + ' (شهر)\n\n' +
-    'أعطِ هذا الكود للزبون المختار ليكتبه للبوت.\n' +
-    'كل طلب جديد يعطي كوداً مختلفاً.',
-  accessRequestUsage: '✏️ اكتب: *كود دورة1* (اسم الموضوع)',
+    (kind === 'personal'
+      ? '🔒 كود شخصي: يُربط بأول رقم يستخدمه، فأعطه للطالب المعني فقط.'
+      : '🌐 كود عام: يستخدمه من يملكه ضمن النطاق المحدد.'),
+  accessRequestUsage:
+    '✏️ اكتب:\n' +
+    '• *كود دورة1* لكود شخصي لموضوع\n' +
+    '• *كود عام* لكود عام للمتجر كله\n' +
+    '• *كود عام دورة1* لكود عام لموضوع',
   topicMissing: (topic) =>
     '⚠️ لا يوجد رد خاص بموضوع *' + topic + '*.\n' +
     'أنشئ رداً ثم اجعله خاصاً بكتابة *خاص رقم ' + topic + '*.',
@@ -139,7 +145,8 @@ const MSG = {
     '🗑 *حذف 2* ← حذف الرد رقم 2\n' +
     '🔒 *خاص 2 دورة1* ← جعل الرد رقم 2 خاصاً بموضوع\n' +
     '🔓 *عام 2* ← جعل الرد رقم 2 عاماً\n' +
-    '🔑 *كود دورة1* ← كود دخول لهذا الموضوع\n' +
+    '🔑 *كود دورة1* ← كود شخصي لطالب في موضوع\n' +
+    '🌐 *كود عام* ← كود عام للمتجر كله\n' +
     '📢 *إشعار 2* ← إرسال الرد رقم 2 لجميع المشتركين\n' +
     '🔗 *رابط* ← رابط مشاركة لزبائنك\n' +
     '📊 *حصتي* ← الردود المستخدمة والمتبقية\n' +
@@ -328,7 +335,7 @@ async function appendWelcomeMedia(cfg, phone, mediaId) {
   if (!r.ok) throw new Error('welcome append failed');
 }
 
-const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_text,welcome_media_ids,private_enabled,notify_quota,notify_used';
+const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_text,welcome_media_ids,private_enabled,public_codes_enabled,notify_quota,notify_used';
 
 async function getStoreById(cfg, id) {
   const r = await fetch(`${cfg.url}/rest/v1/stores?id=eq.${id}&select=${STORE_FIELDS}`, {
@@ -401,7 +408,6 @@ async function createStore(cfg, phone, name) {
 }
 
 // تسجيل الزبون في قائمة مشتركي المتجر، أو تحديث آخر تواصل معه
-// subscribed: true/false لتغيير الاشتراك، وundefined لعدم التغيير
 async function upsertCustomer(cfg, storeId, phone, subscribed) {
   const body = { store_id: storeId, phone, last_seen_at: new Date().toISOString() };
   if (subscribed !== undefined) body.subscribed = subscribed;
@@ -413,7 +419,7 @@ async function upsertCustomer(cfg, storeId, phone, subscribed) {
   if (!r.ok) console.error('customer upsert failed', r.status);
 }
 
-// تسجيل من دخل بكود خاص، ليصله إشعار موضوعه
+// تسجيل من دخل بكود، ليصله إشعار موضوعه
 async function redeemAccess(cfg, accessId, storeId, phone) {
   const r = await fetch(`${cfg.url}/rest/v1/access_redemptions?on_conflict=access_code_id,phone`, {
     method: 'POST',
@@ -436,7 +442,7 @@ async function getRecipients(cfg, storeId, topic) {
   if (topic) {
     const now = encodeURIComponent(new Date().toISOString());
     const ar = await fetch(
-      `${cfg.url}/rest/v1/access_codes?store_id=eq.${storeId}&topic=eq.${encodeURIComponent(topic)}&expires_at=gt.${now}&select=id`,
+      `${cfg.url}/rest/v1/access_codes?store_id=eq.${storeId}&topic=eq.${encodeURIComponent(topic)}&expires_at=gt.${now}&revoked=eq.false&select=id`,
       { headers: sbHeaders(cfg.key) }
     );
     const codes = await ar.json();
@@ -454,7 +460,6 @@ async function getRecipients(cfg, storeId, topic) {
   return phones;
 }
 
-// تجهيز محتوى الإشعار مرة واحدة قبل إرساله للمشتركين
 async function buildPayload(cfg, row, header) {
   if (row.kind === 'text') return { type: 'text', body: header + row.content };
 
@@ -487,7 +492,6 @@ async function sendPayloadTo(cfg, phoneNumberId, to, payload) {
   }
 }
 
-// إرسال على دفعات صغيرة لتفادي تجاوز زمن الدالة
 async function broadcast(cfg, phoneNumberId, payload, phones) {
   for (let i = 0; i < phones.length; i += NOTIFY_CHUNK) {
     const chunk = phones.slice(i, i + NOTIFY_CHUNK);
@@ -514,7 +518,7 @@ async function findConflicts(cfg, storeId, keywords) {
   return [...hit];
 }
 
-// allowedTopic: 'ALL' لكل الردود (للتاجر)، وnull للزبون بلا كود، واسم الموضوع للزبون بكود
+// allowedTopic: 'ALL' لكل الردود (للتاجر والكود العام للمتجر)، وnull للزبون بلا كود، واسم الموضوع للزبون بكود
 async function findReplyForText(cfg, storeId, text, allowedTopic) {
   const cleaned = normalize(text);
   const rows = await listStoreReplies(cfg, storeId);
@@ -543,7 +547,6 @@ async function deleteReplyById(cfg, id) {
   if (!r.ok) throw new Error('delete failed');
 }
 
-// كود دخول من 3 أحرف (يحتوي حرفاً على الأقل)، يختلف في كل طلب
 function randomAccessCode() {
   while (true) {
     let s = '';
@@ -552,13 +555,20 @@ function randomAccessCode() {
   }
 }
 
-async function createAccessCode(cfg, storeId, topic) {
+// kind: 'personal' أو 'public'، وtopic يكون null للكود العام للمتجر كله
+async function createAccessCode(cfg, storeId, topic, kind) {
   const expires = new Date(Date.now() + ACCESS_DAYS * 24 * 60 * 60 * 1000).toISOString();
   for (let i = 0; i < 30; i++) {
     const r = await fetch(`${cfg.url}/rest/v1/access_codes`, {
       method: 'POST',
       headers: { ...sbHeaders(cfg.key), Prefer: 'return=representation' },
-      body: JSON.stringify({ store_id: storeId, code: randomAccessCode(), topic, expires_at: expires }),
+      body: JSON.stringify({
+        store_id: storeId,
+        code: randomAccessCode(),
+        topic,
+        kind,
+        expires_at: expires,
+      }),
     });
     const d = await r.json();
     if (r.ok && Array.isArray(d) && d[0]) return d[0];
@@ -568,23 +578,45 @@ async function createAccessCode(cfg, storeId, topic) {
 
 async function getAccessByCode(cfg, code) {
   const r = await fetch(
-    `${cfg.url}/rest/v1/access_codes?code=eq.${code}&select=id,store_id,topic,expires_at`,
+    `${cfg.url}/rest/v1/access_codes?code=eq.${code}&select=id,store_id,topic,kind,bound_phone,revoked,expires_at`,
     { headers: sbHeaders(cfg.key) }
   );
   const rows = await r.json();
   return Array.isArray(rows) && rows[0] ? rows[0] : null;
 }
 
-// الوصول النشط للزبون: نفس المتجر، ولم تنتهِ الصلاحية
+// ربط الكود الشخصي برقم الطالب أول مرة فقط
+// يعيد true إذا كان الكود للرقم نفسه أو تم ربطه الآن، وfalse إذا كان مرتبطاً برقم آخر
+async function bindPersonalCode(cfg, ac, phone) {
+  if (ac.bound_phone === phone) return true;
+  if (ac.bound_phone) return false;
+
+  const r = await fetch(
+    `${cfg.url}/rest/v1/access_codes?id=eq.${ac.id}&bound_phone=is.null`,
+    {
+      method: 'PATCH',
+      headers: { ...sbHeaders(cfg.key), Prefer: 'return=representation' },
+      body: JSON.stringify({ bound_phone: phone }),
+    }
+  );
+  const rows = await r.json().catch(() => []);
+  if (Array.isArray(rows) && rows.length > 0) return true;
+
+  const fresh = await getAccessByCode(cfg, ac.code || '');
+  return Boolean(fresh && fresh.bound_phone === phone);
+}
+
+// الوصول النشط للزبون: نفس المتجر، ولم تنتهِ الصلاحية، ولم يُلغَ
 async function getActiveAccess(cfg, session) {
   if (!session.access_code_id) return null;
   const r = await fetch(
-    `${cfg.url}/rest/v1/access_codes?id=eq.${session.access_code_id}&select=id,store_id,topic,expires_at`,
+    `${cfg.url}/rest/v1/access_codes?id=eq.${session.access_code_id}&select=id,store_id,topic,kind,revoked,expires_at`,
     { headers: sbHeaders(cfg.key) }
   );
   const rows = await r.json();
   const row = Array.isArray(rows) ? rows[0] : null;
   if (!row) return null;
+  if (row.revoked) return null;
   if (row.store_id !== session.active_store_id) return null;
   if (new Date(row.expires_at).getTime() <= Date.now()) return null;
   return row;
@@ -987,7 +1019,23 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.privateDisabled);
   }
 
-  // كود دورة1: يولّد كود دخول من 3 أحرف لهذا الموضوع
+  // كود عام [موضوع]: كود يستخدمه أي رقم، ويحتاج تفعيل الأدمن
+  const pubCodeM = spaced.match(/^كود عام(?: (.+))?$/);
+  if (pubCodeM) {
+    if (store.public_codes_enabled !== true) {
+      return sendText(cfg, phoneNumberId, from, MSG.publicDisabled);
+    }
+    const topic = pubCodeM[1] ? pubCodeM[1].trim().slice(0, TOPIC_MAX) : null;
+    if (topic && !(await topicExists(cfg, store.id, topic))) {
+      return sendText(cfg, phoneNumberId, from, MSG.topicMissing(topic));
+    }
+    const ac = await createAccessCode(cfg, store.id, topic, 'public');
+    const exp = new Date(ac.expires_at).toISOString().slice(0, 10);
+    return sendText(cfg, phoneNumberId, from,
+      MSG.accessCreated(ac.code, topic || 'كل المحتوى الخاص', exp, 'public'));
+  }
+
+  // كود دورة1: كود شخصي يُربط بأول رقم يستخدمه
   const codeM = spaced.match(/^كود (.+)$/);
   if (codeM) {
     const topic = codeM[1].trim().slice(0, TOPIC_MAX);
@@ -995,9 +1043,9 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     if (!(await topicExists(cfg, store.id, topic))) {
       return sendText(cfg, phoneNumberId, from, MSG.topicMissing(topic));
     }
-    const ac = await createAccessCode(cfg, store.id, topic);
+    const ac = await createAccessCode(cfg, store.id, topic, 'personal');
     const exp = new Date(ac.expires_at).toISOString().slice(0, 10);
-    return sendText(cfg, phoneNumberId, from, MSG.accessCreated(ac.code, topic, exp));
+    return sendText(cfg, phoneNumberId, from, MSG.accessCreated(ac.code, topic, exp, 'personal'));
   }
 
   // خاص 2 دورة1: يجعل الرد خاصاً بموضوع
@@ -1252,7 +1300,6 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.storeLeft);
   }
 
-  // تشغيل/إيقاف الإشعارات للمتجر الحالي
   if (cmd === SUB_OFF_CMD || cmd === SUB_ON_CMD) {
     if (!session.active_store_id) {
       return sendText(cfg, phoneNumberId, from, MSG.notifyNoStore);
@@ -1262,7 +1309,7 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendText(cfg, phoneNumberId, from, on ? MSG.customerSubscribed : MSG.customerUnsubscribed);
   }
 
-  // كود متجر: 3 أرقام فقط، ويُسجَّل الزبون مشتركاً
+  // كود متجر: 3 أرقام فقط
   if (/^\d{3}$/.test(text)) {
     const store = await getStoreByCode(cfg, text);
     if (!store || store.status !== 'active') {
@@ -1273,22 +1320,33 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendWelcome(cfg, phoneNumberId, from, store);
   }
 
-  // كود دخول خاص: 3 أحرف/أرقام، وفيه حرف على الأقل
+  // كود دخول: 3 أحرف/أرقام، وفيه حرف على الأقل (شخصي أو عام)
   const up = text.replace(/\s/g, '').toUpperCase();
   if (/^[A-Z0-9]{3}$/.test(up) && /[A-Z]/.test(up)) {
     const ac = await getAccessByCode(cfg, up);
-    if (!ac || new Date(ac.expires_at).getTime() <= Date.now()) {
+    if (!ac || ac.revoked || new Date(ac.expires_at).getTime() <= Date.now()) {
       return sendText(cfg, phoneNumberId, from, MSG.accessInvalid);
     }
     const store = await getStoreById(cfg, ac.store_id);
     if (!store || store.status !== 'active' || store.private_enabled === false) {
       return sendText(cfg, phoneNumberId, from, MSG.accessInvalid);
     }
+
+    if (ac.kind === 'personal') {
+      ac.code = up;
+      const ok = await bindPersonalCode(cfg, ac, from);
+      if (!ok) return sendText(cfg, phoneNumberId, from, MSG.accessBoundOther);
+    }
+
     await setSession(cfg, from, { state: 'customer', active_store_id: store.id, access_code_id: ac.id });
     await upsertCustomer(cfg, store.id, from);
     await redeemAccess(cfg, ac.id, store.id, from);
     return sendText(cfg, phoneNumberId, from,
-      MSG.accessGranted(store.name, ac.topic, new Date(ac.expires_at).toISOString().slice(0, 10)));
+      MSG.accessGranted(
+        store.name,
+        ac.topic || 'كل المحتوى الخاص',
+        new Date(ac.expires_at).toISOString().slice(0, 10)
+      ));
   }
 
   if (session.active_store_id) {
@@ -1298,12 +1356,11 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
       return sendText(cfg, phoneNumberId, from, MSG.codeInvalid);
     }
 
-    // تحديث آخر تواصل للزبون مع المتجر
     await upsertCustomer(cfg, store.id, from);
 
-    // الزبون يرى العام، وخاص موضوعه فقط إن كان لديه كود نشط والميزة مفعّلة
+    // الزبون يرى العام، وخاصه حسب كوده: موضوع معين، أو كل الخاص للكود العام
     const access = store.private_enabled === false ? null : await getActiveAccess(cfg, session);
-    const allowed = access ? access.topic : null;
+    const allowed = access ? (access.topic || 'ALL') : null;
 
     if (type === 'text' && text) {
       const row = await findReplyForText(cfg, store.id, text, allowed);
