@@ -56,8 +56,20 @@ export default async function handler(req, res) {
     if (pass !== adminPass) return res.status(401).json({ error: 'كلمة السر غير صحيحة' });
 
     if (req.method === 'GET') {
+      // قائمة الأكواد النشطة: ?codes=1
+      if (req.query && req.query.codes === '1') {
+        const now = encodeURIComponent(new Date().toISOString());
+        const r = await fetch(
+          `${url}/rest/v1/access_codes?expires_at=gt.${now}&revoked=eq.false&select=id,code,topic,kind,bound_phone,expires_at,stores(name)&order=created_at.desc&limit=300`,
+          { headers: sbHeaders(key) }
+        );
+        const data = await r.json();
+        if (!r.ok) return res.status(500).json({ error: 'Load codes failed', details: data });
+        return res.status(200).json({ items: data });
+      }
+
       const r = await fetch(
-        `${url}/rest/v1/stores?select=id,name,phone,merchant_code,status,plan,replies_quota,replies_used,plan_expires_at,private_enabled,notify_quota,notify_unit_price,notify_used,created_at&order=created_at.desc`,
+        `${url}/rest/v1/stores?select=id,name,phone,merchant_code,status,plan,replies_quota,replies_used,plan_expires_at,private_enabled,public_codes_enabled,notify_quota,notify_unit_price,notify_used,created_at&order=created_at.desc`,
         { headers: sbHeaders(key) }
       );
       const data = await r.json();
@@ -66,8 +78,22 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'POST') {
-      const id = String(body.id || '');
       const action = String(body.action || '');
+
+      // إلغاء كود معين: يستخدم معرّف الكود وليس معرّف المتجر
+      if (action === 'revoke_code') {
+        const cid = String(body.code_id || '');
+        if (!/^[0-9a-f-]{36}$/i.test(cid)) return res.status(400).json({ error: 'Invalid code id' });
+        const r = await fetch(`${url}/rest/v1/access_codes?id=eq.${cid}`, {
+          method: 'PATCH',
+          headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
+          body: JSON.stringify({ revoked: true }),
+        });
+        if (!r.ok) return res.status(500).json({ error: 'Revoke failed' });
+        return res.status(200).json({ ok: true });
+      }
+
+      const id = String(body.id || '');
       if (!/^[0-9a-f-]{36}$/i.test(id)) return res.status(400).json({ error: 'Invalid id' });
 
       if (action === 'delete') {
@@ -91,6 +117,8 @@ export default async function handler(req, res) {
       else if (action === 'activate') patch = { status: 'active' };
       else if (action === 'private_on') patch = { private_enabled: true };
       else if (action === 'private_off') patch = { private_enabled: false };
+      else if (action === 'public_on') patch = { public_codes_enabled: true };
+      else if (action === 'public_off') patch = { public_codes_enabled: false };
       else if (action === 'notify_set') {
         const quota = toInt(body.quota, 100000);
         const unit = toInt(body.unit_price, 1000000);
