@@ -8,6 +8,7 @@ const ALBUM_MAX = 10;
 const TRIAL_REPLIES = 50;
 const ACCESS_DAYS = 30;
 const TOPIC_MAX = 30;
+const NOTIFY_CHUNK = 15;
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const MEDIA_TYPES = ['audio', 'image', 'video'];
 const IGNORED_TYPES = ['unsupported', 'reaction', 'sticker', 'system', 'unknown', 'order', 'contacts', 'location', 'interactive', 'button'];
@@ -54,6 +55,9 @@ const WELCOME_CMD = normalize('ترحيب');
 const WELCOME_DEL_CMD = normalize('حذف الترحيب');
 const LINK_CMD = normalize('رابط');
 const LEAVE_CMD = normalize('تغيير المتجر');
+const SUB_OFF_CMD = normalize('إيقاف الإشعارات');
+const SUB_ON_CMD = normalize('تشغيل الإشعارات');
+const NOTIFY_RE = /^اشعار (\d+)$/;
 
 const MSG = {
   customerWelcome:
@@ -65,7 +69,8 @@ const MSG = {
     '✅ *مرحباً بك في ' + name + '* 🏪\n\n' +
     'اكتب كلمة للحصول على الرد، مثل:\n' +
     '• سلام\n• مرحبا\n\n' +
-    'لتغيير المتجر اكتب *تغيير المتجر*.',
+    'لتغيير المتجر اكتب *تغيير المتجر*.\n' +
+    'لإيقاف الإشعارات اكتب *إيقاف الإشعارات*.',
   storeLeft: '↩️ *تم إنهاء المتجر الحالي*\n\nأرسل كود المتجر الجديد للمتابعة.',
   customerUnknown:
     '🤔 *لم أفهم طلبك*\n\n' +
@@ -80,6 +85,18 @@ const MSG = {
   accessInvalid: '❌ *الكود غير صحيح أو منتهي الصلاحية*',
   privateDisabled: '⛔ *ميزة المحتوى الخاص موقوفة لحسابك*\n\nتواصل مع الإدارة لتفعيلها.',
   storeStopped: '⛔ *حسابك موقوف حالياً*\n\nتواصل مع الإدارة لإعادة التفعيل.',
+  customerSubscribed: '🔔 *تم تشغيل الإشعارات*\n\nستصلك إشعارات هذا المتجر عند إضافة الجديد.',
+  customerUnsubscribed: '🔕 *تم إيقاف الإشعارات*\n\nاكتب *تشغيل الإشعارات* لإعادتها.',
+  notifyNoStore: '⚠️ أدخل كود المتجر أولاً، ثم اكتب *إيقاف الإشعارات* أو *تشغيل الإشعارات*.',
+  notifyHeader: (name) => '📢 *جديد في ' + name + '*\n\n',
+  notifyUsage: '📢 *إرسال إشعار*\n\nاكتب *إشعار 2* لإرسال الرد رقم 2 لجميع المشتركين.',
+  notifyNoFeature: '⛔ *خاصية الإشعارات غير مفعلة لحسابك*\n\nتواصل مع الإدارة لتفعيلها.',
+  notifyNoQuota: '⛔ *انتهت حصة الإشعارات لهذا الشهر*\n\nتواصل مع الإدارة لتجديدها.',
+  notifyNoSubscribers: '📭 لا يوجد مشتركون يستقبلون هذا الإشعار بعد.',
+  notifyDone: (sent, remaining) =>
+    '📢 *تم إرسال الإشعار*\n\n' +
+    'عدد المستلمين: *' + sent + '*\n' +
+    'الحصة المتبقية هذا الشهر: *' + remaining + '* إشعار',
   registerAskName:
     '✍️ *تسجيل متجر جديد*\n\n' +
     'اكتب اسم متجرك كما تريد أن يظهر للزبائن.\n' +
@@ -123,6 +140,7 @@ const MSG = {
     '🔒 *خاص 2 دورة1* ← جعل الرد رقم 2 خاصاً بموضوع\n' +
     '🔓 *عام 2* ← جعل الرد رقم 2 عاماً\n' +
     '🔑 *كود دورة1* ← كود دخول لهذا الموضوع\n' +
+    '📢 *إشعار 2* ← إرسال الرد رقم 2 لجميع المشتركين\n' +
     '🔗 *رابط* ← رابط مشاركة لزبائنك\n' +
     '📊 *حصتي* ← الردود المستخدمة والمتبقية\n' +
     '❌ *إلغاء* ← الخروج من أي خطوة\n' +
@@ -310,7 +328,7 @@ async function appendWelcomeMedia(cfg, phone, mediaId) {
   if (!r.ok) throw new Error('welcome append failed');
 }
 
-const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_text,welcome_media_ids,private_enabled';
+const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_text,welcome_media_ids,private_enabled,notify_quota,notify_used';
 
 async function getStoreById(cfg, id) {
   const r = await fetch(`${cfg.url}/rest/v1/stores?id=eq.${id}&select=${STORE_FIELDS}`, {
@@ -382,6 +400,149 @@ async function createStore(cfg, phone, name) {
   });
 }
 
+// تسجيل الزبون في قائمة مشتركي المتجر، أو تحديث آخر تواصل معه
+// subscribed: true/false لتغيير الاشتراك، وundefined لعدم التغيير
+async function upsertCustomer(cfg, storeId, phone, subscribed) {
+  const body = { store_id: storeId, phone, last_seen_at: new Date().toISOString() };
+  if (subscribed !== undefined) body.subscribed = subscribed;
+  const r = await fetch(`${cfg.url}/rest/v1/store_customers?on_conflict=store_id,phone`, {
+    method: 'POST',
+    headers: { ...sbHeaders(cfg.key), Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) console.error('customer upsert failed', r.status);
+}
+
+// تسجيل من دخل بكود خاص، ليصله إشعار موضوعه
+async function redeemAccess(cfg, accessId, storeId, phone) {
+  const r = await fetch(`${cfg.url}/rest/v1/access_redemptions?on_conflict=access_code_id,phone`, {
+    method: 'POST',
+    headers: { ...sbHeaders(cfg.key), Prefer: 'resolution=ignore-duplicates,return=minimal' },
+    body: JSON.stringify({ access_code_id: accessId, store_id: storeId, phone }),
+  });
+  if (!r.ok) console.error('redeem failed', r.status);
+}
+
+// المستلمون: كل المشتركين للإشعارات العامة، ومن لديه كود نشط للموضوع للخاصة
+async function getRecipients(cfg, storeId, topic) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/store_customers?store_id=eq.${storeId}&subscribed=eq.true&select=phone&limit=10000`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const subs = await r.json();
+  if (!Array.isArray(subs)) return [];
+  let phones = subs.map(s => s.phone);
+
+  if (topic) {
+    const now = encodeURIComponent(new Date().toISOString());
+    const ar = await fetch(
+      `${cfg.url}/rest/v1/access_codes?store_id=eq.${storeId}&topic=eq.${encodeURIComponent(topic)}&expires_at=gt.${now}&select=id`,
+      { headers: sbHeaders(cfg.key) }
+    );
+    const codes = await ar.json();
+    const ids = Array.isArray(codes) ? codes.map(c => c.id) : [];
+    if (ids.length === 0) return [];
+
+    const rr = await fetch(
+      `${cfg.url}/rest/v1/access_redemptions?access_code_id=in.(${ids.join(',')})&select=phone`,
+      { headers: sbHeaders(cfg.key) }
+    );
+    const red = await rr.json();
+    const allowed = new Set(Array.isArray(red) ? red.map(x => x.phone) : []);
+    phones = phones.filter(p => allowed.has(p));
+  }
+  return phones;
+}
+
+// تجهيز محتوى الإشعار مرة واحدة قبل إرساله للمشتركين
+async function buildPayload(cfg, row, header) {
+  if (row.kind === 'text') return { type: 'text', body: header + row.content };
+
+  const ids = row.kind === 'album' ? (row.media_ids || []) : (row.media_id ? [row.media_id] : []);
+  if (ids.length === 0) return null;
+
+  const r = await fetch(
+    `${cfg.url}/rest/v1/media_files?id=in.(${ids.join(',')})&select=id,kind,storage_path`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const files = await r.json();
+  if (!Array.isArray(files)) return null;
+
+  const byId = new Map(files.map(f => [f.id, f]));
+  const items = ids.map(id => byId.get(id)).filter(Boolean).map(f => ({ kind: f.kind, path: f.storage_path }));
+  if (items.length === 0) return null;
+  return { type: 'media', header, items };
+}
+
+async function sendPayloadTo(cfg, phoneNumberId, to, payload) {
+  if (payload.type === 'text') return sendRaw(cfg, phoneNumberId, to, payload.body);
+
+  if (payload.items[0].kind === 'audio') {
+    await sendRaw(cfg, phoneNumberId, to, payload.header.trim());
+  }
+  for (let i = 0; i < payload.items.length; i++) {
+    const it = payload.items[i];
+    const caption = i === 0 && it.kind !== 'audio' ? payload.header.trim() : null;
+    await sendMediaTo(cfg, phoneNumberId, to, it.kind, it.path, caption);
+  }
+}
+
+// إرسال على دفعات صغيرة لتفادي تجاوز زمن الدالة
+async function broadcast(cfg, phoneNumberId, payload, phones) {
+  for (let i = 0; i < phones.length; i += NOTIFY_CHUNK) {
+    const chunk = phones.slice(i, i + NOTIFY_CHUNK);
+    await Promise.all(chunk.map(p =>
+      sendPayloadTo(cfg, phoneNumberId, p, payload).catch(err =>
+        console.error('notify failed:', err?.message || err)
+      )
+    ));
+  }
+}
+
+async function findConflicts(cfg, storeId, keywords) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=keywords`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const rows = await r.json();
+  const hit = new Set();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    for (const k of row.keywords || []) {
+      if (keywords.includes(k)) hit.add(k);
+    }
+  }
+  return [...hit];
+}
+
+// allowedTopic: 'ALL' لكل الردود (للتاجر)، وnull للزبون بلا كود، واسم الموضوع للزبون بكود
+async function findReplyForText(cfg, storeId, text, allowedTopic) {
+  const cleaned = normalize(text);
+  const rows = await listStoreReplies(cfg, storeId);
+  for (const row of rows) {
+    const visible = allowedTopic === 'ALL' || !row.topic || row.topic === allowedTopic;
+    if (!visible) continue;
+    if ((row.keywords || []).includes(cleaned)) return row;
+  }
+  return null;
+}
+
+async function listStoreReplies(cfg, storeId) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords,kind,content,media_id,media_ids,topic,created_at&order=created_at.asc`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const rows = await r.json();
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function deleteReplyById(cfg, id) {
+  const r = await fetch(`${cfg.url}/rest/v1/auto_replies?id=eq.${id}`, {
+    method: 'DELETE',
+    headers: { ...sbHeaders(cfg.key), Prefer: 'return=minimal' },
+  });
+  if (!r.ok) throw new Error('delete failed');
+}
+
 // كود دخول من 3 أحرف (يحتوي حرفاً على الأقل)، يختلف في كل طلب
 function randomAccessCode() {
   while (true) {
@@ -445,50 +606,6 @@ async function setReplyTopic(cfg, id, topic) {
     body: JSON.stringify({ topic, is_private: Boolean(topic) }),
   });
   if (!r.ok) throw new Error('topic update failed');
-}
-
-async function findConflicts(cfg, storeId, keywords) {
-  const r = await fetch(
-    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=keywords`,
-    { headers: sbHeaders(cfg.key) }
-  );
-  const rows = await r.json();
-  const hit = new Set();
-  for (const row of Array.isArray(rows) ? rows : []) {
-    for (const k of row.keywords || []) {
-      if (keywords.includes(k)) hit.add(k);
-    }
-  }
-  return [...hit];
-}
-
-// allowedTopic: 'ALL' لكل الردود (للتاجر)، وnull للزبون بلا كود، واسم الموضوع للزبون بكود
-async function findReplyForText(cfg, storeId, text, allowedTopic) {
-  const cleaned = normalize(text);
-  const rows = await listStoreReplies(cfg, storeId);
-  for (const row of rows) {
-    const visible = allowedTopic === 'ALL' || !row.topic || row.topic === allowedTopic;
-    if (!visible) continue;
-    if ((row.keywords || []).includes(cleaned)) return row;
-  }
-  return null;
-}
-
-async function listStoreReplies(cfg, storeId) {
-  const r = await fetch(
-    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords,kind,content,media_id,media_ids,topic,created_at&order=created_at.asc`,
-    { headers: sbHeaders(cfg.key) }
-  );
-  const rows = await r.json();
-  return Array.isArray(rows) ? rows : [];
-}
-
-async function deleteReplyById(cfg, id) {
-  const r = await fetch(`${cfg.url}/rest/v1/auto_replies?id=eq.${id}`, {
-    method: 'DELETE',
-    headers: { ...sbHeaders(cfg.key), Prefer: 'return=minimal' },
-  });
-  if (!r.ok) throw new Error('delete failed');
 }
 
 function replyLabel(row) {
@@ -838,6 +955,32 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       MSG.quota(store.replies_used || 0, store.replies_quota || 0));
   }
 
+  // إشعار 2: يرسل الرد رقم 2 لجميع المشتركين، ويُحتسب من حصة الإشعارات
+  const nm = cmd.match(NOTIFY_RE);
+  if (nm) {
+    if (!store.notify_quota) {
+      return sendText(cfg, phoneNumberId, from, MSG.notifyNoFeature);
+    }
+    const n = parseInt(nm[1], 10);
+    const list = await listStoreReplies(cfg, store.id);
+    const target = list[n - 1];
+    if (!target) return sendText(cfg, phoneNumberId, from, MSG.replyNumberNotFound);
+
+    const used = store.notify_used || 0;
+    const quota = store.notify_quota || 0;
+    if (used >= quota) return sendText(cfg, phoneNumberId, from, MSG.notifyNoQuota);
+
+    const payload = await buildPayload(cfg, target, MSG.notifyHeader(store.name));
+    if (!payload) return sendText(cfg, phoneNumberId, from, MSG.editEmpty);
+
+    const phones = await getRecipients(cfg, store.id, target.topic || null);
+    if (phones.length === 0) return sendText(cfg, phoneNumberId, from, MSG.notifyNoSubscribers);
+
+    await patchStore(cfg, store.id, { notify_used: used + 1 });
+    await broadcast(cfg, phoneNumberId, payload, phones);
+    return sendText(cfg, phoneNumberId, from, MSG.notifyDone(phones.length, quota - used - 1));
+  }
+
   // ميزة المحتوى الخاص: الأدمن يوقفها لكل تاجر
   const isPrivateCmd = /^كود /.test(spaced) || /^خاص /.test(spaced);
   if (isPrivateCmd && store.private_enabled === false) {
@@ -1109,13 +1252,24 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.storeLeft);
   }
 
-  // كود متجر: 3 أرقام فقط
+  // تشغيل/إيقاف الإشعارات للمتجر الحالي
+  if (cmd === SUB_OFF_CMD || cmd === SUB_ON_CMD) {
+    if (!session.active_store_id) {
+      return sendText(cfg, phoneNumberId, from, MSG.notifyNoStore);
+    }
+    const on = cmd === SUB_ON_CMD;
+    await upsertCustomer(cfg, session.active_store_id, from, on);
+    return sendText(cfg, phoneNumberId, from, on ? MSG.customerSubscribed : MSG.customerUnsubscribed);
+  }
+
+  // كود متجر: 3 أرقام فقط، ويُسجَّل الزبون مشتركاً
   if (/^\d{3}$/.test(text)) {
     const store = await getStoreByCode(cfg, text);
     if (!store || store.status !== 'active') {
       return sendText(cfg, phoneNumberId, from, MSG.codeInvalid);
     }
     await setSession(cfg, from, { state: 'customer', active_store_id: store.id, access_code_id: null });
+    await upsertCustomer(cfg, store.id, from);
     return sendWelcome(cfg, phoneNumberId, from, store);
   }
 
@@ -1131,6 +1285,8 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
       return sendText(cfg, phoneNumberId, from, MSG.accessInvalid);
     }
     await setSession(cfg, from, { state: 'customer', active_store_id: store.id, access_code_id: ac.id });
+    await upsertCustomer(cfg, store.id, from);
+    await redeemAccess(cfg, ac.id, store.id, from);
     return sendText(cfg, phoneNumberId, from,
       MSG.accessGranted(store.name, ac.topic, new Date(ac.expires_at).toISOString().slice(0, 10)));
   }
@@ -1141,6 +1297,9 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
       await setSession(cfg, from, { state: 'idle', active_store_id: null, access_code_id: null });
       return sendText(cfg, phoneNumberId, from, MSG.codeInvalid);
     }
+
+    // تحديث آخر تواصل للزبون مع المتجر
+    await upsertCustomer(cfg, store.id, from);
 
     // الزبون يرى العام، وخاص موضوعه فقط إن كان لديه كود نشط والميزة مفعّلة
     const access = store.private_enabled === false ? null : await getActiveAccess(cfg, session);
