@@ -37,6 +37,9 @@ input[type=password],input[type=text]{width:100%;padding:10px;border:1px solid #
 .box-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .box-row input{width:130px}
 .box-row .total{font-weight:700;color:#188038;font-size:14px}
+.codes-row{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px dashed #eee;padding:8px 0;flex-wrap:wrap}
+.codes-row .code{font-weight:700;font-size:15px;direction:ltr}
+.codes-row .info{font-size:12px;color:#555}
 #msg{font-size:13px;margin-top:8px;min-height:18px;white-space:pre-line}
 .ok{color:#188038}.err{color:#d93025}
 .hidden{display:none}
@@ -76,6 +79,14 @@ input[type=password],input[type=text]{width:100%;padding:10px;border:1px solid #
     </div>
 
     <div class="card">
+      <div class="row">
+        <h1 style="font-size:16px">الأكواد النشطة</h1>
+        <button class="btn gray" id="btn-codes">عرض الأكواد</button>
+      </div>
+      <div id="codes-box" class="hidden" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
       <div id="list"></div>
       <div id="msg"></div>
     </div>
@@ -95,8 +106,8 @@ function show(text, cls) {
   m.textContent = text;
 }
 
-async function api(method, body) {
-  const res = await fetch('/api/admin', {
+async function api(method, body, query) {
+  const res = await fetch('/api/admin' + (query || ''), {
     method,
     headers: { 'Content-Type': 'application/json', 'X-Admin-Password': password },
     body: body ? JSON.stringify(body) : undefined,
@@ -159,13 +170,13 @@ function renderList() {
       'الردود: ' + s.replies_used + ' من ' + s.replies_quota + ' | ' +
       'الانتهاء: ' + fmtDate(s.plan_expires_at) + '\n' +
       'المحتوى الخاص: ' + (s.private_enabled ? 'مفعّل ✅' : 'موقوف ⛔') + '\n' +
+      'الأكواد العامة: ' + (s.public_codes_enabled ? 'مفعّلة ✅' : 'موقوفة ⛔') + '\n' +
       'الإشعارات: ' + used + ' من ' + quota + ' إشعار شهرياً';
     info.appendChild(meta);
 
     top.appendChild(info);
     row.appendChild(top);
 
-    // حصة الإشعارات: الأدمن يحدد عدد الإشعارات وسعر الإشعار، والإجمالي يُحسب تلقائياً
     const box2 = document.createElement('div');
     box2.className = 'box';
 
@@ -239,12 +250,81 @@ function renderList() {
       addBtn('تفعيل الخاص', 'green', b => act(s.id, 'private_on', {}, b));
     }
 
+    if (s.public_codes_enabled) {
+      addBtn('إيقاف الأكواد العامة', 'gray', b => act(s.id, 'public_off', {}, b));
+    } else {
+      addBtn('تفعيل الأكواد العامة', 'green', b => act(s.id, 'public_on', {}, b));
+    }
+
     addBtn('حذف الحساب', 'danger', () => toggleDelete(row, s));
 
     row.appendChild(actions);
     box.appendChild(row);
   });
 }
+
+async function renderCodes() {
+  const box = $('codes-box');
+  box.innerHTML = '';
+  try {
+    const data = await api('GET', null, '?codes=1');
+    const items = Array.isArray(data.items) ? data.items : [];
+    if (items.length === 0) {
+      box.innerHTML = '<div class="sub">لا توجد أكواد نشطة</div>';
+      return;
+    }
+    items.forEach(c => {
+      const row = document.createElement('div');
+      row.className = 'codes-row';
+
+      const info = document.createElement('div');
+      const code = document.createElement('div');
+      code.className = 'code';
+      code.textContent = c.code;
+      const det = document.createElement('div');
+      det.className = 'info';
+      const storeName = c.stores && c.stores.name ? c.stores.name : '—';
+      const kindLabel = c.kind === 'public' ? 'عام' : 'شخصي';
+      const bound = c.kind === 'personal' ? (' | مرتبط برقم: ' + (c.bound_phone || 'لم يُستخدم بعد')) : '';
+      det.textContent =
+        storeName + ' | ' + kindLabel + ' | ' +
+        (c.topic || 'كل المحتوى الخاص') +
+        ' | ينتهي: ' + fmtDate(c.expires_at) + bound;
+      info.append(code, det);
+
+      const rv = document.createElement('button');
+      rv.className = 'btn red';
+      rv.textContent = 'إلغاء الكود';
+      rv.addEventListener('click', async () => {
+        if (!confirm('إلغاء الكود ' + c.code + ' نهائياً؟')) return;
+        rv.disabled = true;
+        try {
+          await api('POST', { action: 'revoke_code', code_id: c.id });
+          show('✓ تم إلغاء الكود ' + c.code, 'ok');
+          await renderCodes();
+        } catch (e) {
+          show('✗ فشل الإلغاء: ' + e.message, 'err');
+          rv.disabled = false;
+        }
+      });
+
+      row.append(info, rv);
+      box.appendChild(row);
+    });
+  } catch (e) {
+    box.innerHTML = '<div class="err">✗ تعذر تحميل الأكواد: ' + e.message + '</div>';
+  }
+}
+
+$('btn-codes').addEventListener('click', async () => {
+  const box = $('codes-box');
+  if (!box.classList.contains('hidden')) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
+  await renderCodes();
+});
 
 async function saveNotify(s, qInput, uInput, btn) {
   const q = Number(qInput.value);
