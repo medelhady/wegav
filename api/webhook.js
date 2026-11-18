@@ -78,6 +78,7 @@ const MSG = {
     '📅 صالح حتى: ' + exp + '\n\n' +
     'اكتب كلمة الرد للحصول عليه.',
   accessInvalid: '❌ *الكود غير صحيح أو منتهي الصلاحية*',
+  privateDisabled: '⛔ *ميزة المحتوى الخاص موقوفة لحسابك*\n\nتواصل مع الإدارة لتفعيلها.',
   storeStopped: '⛔ *حسابك موقوف حالياً*\n\nتواصل مع الإدارة لإعادة التفعيل.',
   registerAskName:
     '✍️ *تسجيل متجر جديد*\n\n' +
@@ -309,7 +310,7 @@ async function appendWelcomeMedia(cfg, phone, mediaId) {
   if (!r.ok) throw new Error('welcome append failed');
 }
 
-const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_text,welcome_media_ids';
+const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_text,welcome_media_ids,private_enabled';
 
 async function getStoreById(cfg, id) {
   const r = await fetch(`${cfg.url}/rest/v1/stores?id=eq.${id}&select=${STORE_FIELDS}`, {
@@ -837,6 +838,12 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       MSG.quota(store.replies_used || 0, store.replies_quota || 0));
   }
 
+  // ميزة المحتوى الخاص: الأدمن يوقفها لكل تاجر
+  const isPrivateCmd = /^كود /.test(spaced) || /^خاص /.test(spaced);
+  if (isPrivateCmd && store.private_enabled === false) {
+    return sendText(cfg, phoneNumberId, from, MSG.privateDisabled);
+  }
+
   // كود دورة1: يولّد كود دخول من 3 أحرف لهذا الموضوع
   const codeM = spaced.match(/^كود (.+)$/);
   if (codeM) {
@@ -1120,7 +1127,7 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
       return sendText(cfg, phoneNumberId, from, MSG.accessInvalid);
     }
     const store = await getStoreById(cfg, ac.store_id);
-    if (!store || store.status !== 'active') {
+    if (!store || store.status !== 'active' || store.private_enabled === false) {
       return sendText(cfg, phoneNumberId, from, MSG.accessInvalid);
     }
     await setSession(cfg, from, { state: 'customer', active_store_id: store.id, access_code_id: ac.id });
@@ -1135,8 +1142,8 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
       return sendText(cfg, phoneNumberId, from, MSG.codeInvalid);
     }
 
-    // الزبون يرى العام، وخاص موضوعه فقط إن كان لديه كود نشط
-    const access = await getActiveAccess(cfg, session);
+    // الزبون يرى العام، وخاص موضوعه فقط إن كان لديه كود نشط والميزة مفعّلة
+    const access = store.private_enabled === false ? null : await getActiveAccess(cfg, session);
     const allowed = access ? access.topic : null;
 
     if (type === 'text' && text) {
