@@ -51,7 +51,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'GET') {
       const r = await fetch(
-        `${url}/rest/v1/stores?select=id,name,phone,merchant_code,status,plan,replies_quota,replies_used,plan_expires_at,private_enabled,created_at&order=created_at.desc`,
+        `${url}/rest/v1/stores?select=id,name,phone,merchant_code,status,plan,replies_quota,replies_used,plan_expires_at,private_enabled,notify_price,created_at&order=created_at.desc`,
         { headers: sbHeaders(key) }
       );
       const data = await r.json();
@@ -85,6 +85,13 @@ export default async function handler(req, res) {
       else if (action === 'activate') patch = { status: 'active' };
       else if (action === 'private_on') patch = { private_enabled: true };
       else if (action === 'private_off') patch = { private_enabled: false };
+      else if (action === 'set_price') {
+        const price = Math.floor(Number(body.price));
+        if (!Number.isFinite(price) || price < 0 || price > 1000000) {
+          return res.status(400).json({ error: 'السعر يجب أن يكون رقماً بين 0 و 1000000' });
+        }
+        patch = { notify_price: price };
+      }
       else if (action === 'paid') {
         const quota = Number(body.quota || 500);
         const months = Number(body.months || 1);
