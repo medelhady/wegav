@@ -9,6 +9,7 @@ const TRIAL_REPLIES = 50;
 const MEDIA_TYPES = ['audio', 'image', 'video'];
 const IGNORED_TYPES = ['unsupported', 'reaction', 'sticker', 'system', 'unknown', 'order', 'contacts', 'location', 'interactive', 'button'];
 const KIND_AR = { audio: 'صوت', image: 'صورة', video: 'فيديو' };
+const BOT_NUMBER = (process.env.BOT_WA_NUMBER || '22224404036').replace(/\D/g, '');
 
 const EXT_BY_MIME = {
   'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/amr': 'amr', 'audio/aac': 'aac',
@@ -48,6 +49,8 @@ const MENU_CMD = normalize('قائمة');
 const QUOTA_CMD = normalize('حصتي');
 const WELCOME_CMD = normalize('ترحيب');
 const WELCOME_DEL_CMD = normalize('حذف الترحيب');
+const LINK_CMD = normalize('رابط');
+const LEAVE_CMD = normalize('تغيير المتجر');
 
 const MSG = {
   customerWelcome:
@@ -59,10 +62,11 @@ const MSG = {
     '✅ *مرحباً بك في ' + name + '* 🏪\n\n' +
     'اكتب كلمة للحصول على الرد، مثل:\n' +
     '• سلام\n• مرحبا\n\n' +
-    'لتغيير المتجر أرسل كود آخر.',
+    'لتغيير المتجر اكتب *تغيير المتجر*.',
+  storeLeft: '↩️ *تم إنهاء المتجر الحالي*\n\nأرسل كود المتجر الجديد للمتابعة.',
   customerUnknown:
     '🤔 *لم أفهم طلبك*\n\n' +
-    'اكتب كلمة من كلمات المتجر، أو أرسل كود المتجر (3 أرقام).',
+    'اكتب كلمة من كلمات المتجر، أو اكتب *تغيير المتجر* لإدخال كود آخر.',
   codeInvalid: '❌ *الكود غير صحيح أو المتجر غير متاح*\n\nتأكد من الكود وأعد المحاولة.',
   storeStopped: '⛔ *حسابك موقوف حالياً*\n\nتواصل مع الإدارة لإعادة التفعيل.',
   registerAskName:
@@ -78,8 +82,13 @@ const MSG = {
     '📌 *ابدأ الآن:*\n' +
     '1️⃣ اكتب *ترحيب* لتحديد الرسالة التي يستقبلها الزبون عند دخول متجرك\n' +
     '2️⃣ اكتب *إضافة* لإضافة رد\n' +
-    '3️⃣ اكتب *قائمة* لعرض كل الخيارات\n\n' +
-    'أعط زبائنك الكود ليكتبوه للبوت ويحصلوا على ردودك.',
+    '3️⃣ اكتب *رابط* للحصول على رابط مشاركة لزبائنك\n' +
+    '4️⃣ اكتب *قائمة* لعرض كل الخيارات',
+  merchantLink: (store) =>
+    '🔗 *رابط متجرك*\n\n' +
+    'شارك هذا الرابط مع زبائنك، عند الضغط عليه يفتح المحادثة مع كود متجرك جاهزاً:\n\n' +
+    'https://wa.me/' + BOT_NUMBER + '?text=' + store.merchant_code + '\n\n' +
+    '🔑 كودك: *' + store.merchant_code + '*',
   menu: (store, used, quota) =>
     '📋 *قائمة التاجر*\n' +
     '━━━━━━━━━━━━\n' +
@@ -87,6 +96,7 @@ const MSG = {
     '➕ *إضافة* ← رد جديد\n' +
     '✏️ *تعديل* ← تعديل رد موجود\n' +
     '🗑 *حذف 2* ← حذف الرد رقم 2\n' +
+    '🔗 *رابط* ← رابط مشاركة لزبائنك\n' +
     '📊 *حصتي* ← الردود المستخدمة والمتبقية\n' +
     '❌ *إلغاء* ← الخروج من أي خطوة\n' +
     '━━━━━━━━━━━━\n' +
@@ -264,7 +274,6 @@ async function appendPendingMedia(cfg, phone, mediaId) {
   if (!r.ok) throw new Error('append failed');
 }
 
-// إضافة ملف للترحيب دون تغيير حالة الانتظار
 async function appendWelcomeMedia(cfg, phone, mediaId) {
   const r = await fetch(`${cfg.url}/rest/v1/rpc/append_welcome_media`, {
     method: 'POST',
@@ -501,7 +510,6 @@ async function sendText(cfg, phoneNumberId, to, body) {
   return sendRaw(cfg, phoneNumberId, to, body);
 }
 
-// رسالة الترحيب: نصها أولاً، ثم جميع ملفاتها بالترتيب الذي رفعها به التاجر
 async function sendWelcome(cfg, phoneNumberId, to, store) {
   const ids = store.welcome_media_ids || [];
   if (ids.length === 0 && !store.welcome_text) {
@@ -727,6 +735,10 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       MSG.menu(store, store.replies_used || 0, store.replies_quota || 0));
   }
 
+  if (cmd === LINK_CMD) {
+    return sendText(cfg, phoneNumberId, from, MSG.merchantLink(store));
+  }
+
   if (cmd === QUOTA_CMD) {
     return sendText(cfg, phoneNumberId, from,
       MSG.quota(store.replies_used || 0, store.replies_quota || 0));
@@ -753,7 +765,6 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.welcomeRemoved);
   }
 
-  // وضع الترحيب: نجمع النص والملفات، و"تم" يحفظ الكل دفعة واحدة
   if (session.state === 'await_welcome') {
     if (cmd === DONE_CMD) {
       const fresh = await getSession(cfg, from);
@@ -953,6 +964,13 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.registerAskName);
   }
 
+  // الزبون يُنهي المتجر الحالي بنفسه
+  if (cmd === LEAVE_CMD) {
+    await setSession(cfg, from, { state: 'idle', active_store_id: null });
+    return sendText(cfg, phoneNumberId, from, MSG.storeLeft);
+  }
+
+  // كود المتجر: يُحفظ في الجلسة، فلا يحتاج الزبون تكراره بعد ذلك
   if (/^\d{3}$/.test(text)) {
     const store = await getStoreByCode(cfg, text);
     if (!store || store.status !== 'active') {
@@ -962,6 +980,7 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendWelcome(cfg, phoneNumberId, from, store);
   }
 
+  // الزبون داخل متجر محفوظ في الجلسة: نرد من هذا المتجر مباشرة
   if (session.active_store_id) {
     const store = await getStoreById(cfg, session.active_store_id);
     if (!store || store.status !== 'active') {
