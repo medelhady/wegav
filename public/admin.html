@@ -32,10 +32,11 @@ input[type=password],input[type=text]{width:100%;padding:10px;border:1px solid #
 .stat .v{font-size:20px;font-weight:700;margin-top:4px}
 .danger-box{background:#fff5f5;border:1px solid #f1b3ad;border-radius:8px;padding:10px;margin-top:8px}
 .danger-box .hint{font-size:12px;color:#a50e0e;margin-bottom:6px}
-.price-box{background:#f7f9fc;border:1px solid #dde4ee;border-radius:8px;padding:10px;margin-top:8px}
-.price-box .hint{font-size:12px;color:#555;margin-bottom:6px}
-.price-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.price-row input{width:140px}
+.box{background:#f7f9fc;border:1px solid #dde4ee;border-radius:8px;padding:10px;margin-top:8px}
+.box .hint{font-size:12px;color:#555;margin-bottom:6px}
+.box-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.box-row input{width:130px}
+.box-row .total{font-weight:700;color:#188038;font-size:14px}
 #msg{font-size:13px;margin-top:8px;min-height:18px;white-space:pre-line}
 .ok{color:#188038}.err{color:#d93025}
 .hidden{display:none}
@@ -146,55 +147,73 @@ function renderList() {
     name.append(' ', badge);
     info.appendChild(name);
 
+    const quota = Number(s.notify_quota || 0);
+    const unit = Number(s.notify_unit_price || 0);
+    const used = Number(s.notify_used || 0);
+
     const meta = document.createElement('div');
     meta.className = 'meta';
-    const price = Number(s.notify_price || 0);
     meta.textContent =
       'الهاتف: ' + (s.phone || '—') + '\n' +
       'الخطة: ' + (s.plan === 'paid' ? 'مدفوعة' : 'تجريبية') + ' | ' +
       'الردود: ' + s.replies_used + ' من ' + s.replies_quota + ' | ' +
       'الانتهاء: ' + fmtDate(s.plan_expires_at) + '\n' +
       'المحتوى الخاص: ' + (s.private_enabled ? 'مفعّل ✅' : 'موقوف ⛔') + '\n' +
-      'سعر الإشعارات: ' + (price === 0 ? 'مجاني (تجربة)' : price + ' أوقية');
+      'الإشعارات: ' + used + ' من ' + quota + ' إشعار شهرياً';
     info.appendChild(meta);
 
     top.appendChild(info);
     row.appendChild(top);
 
-    // خانة سعر الإشعارات: الأدمن يضيف المبلغ أو يغيّره، و0 للتجربة
-    const priceBox = document.createElement('div');
-    priceBox.className = 'price-box';
+    // حصة الإشعارات: الأدمن يحدد عدد الإشعارات وسعر الإشعار، والإجمالي يُحسب تلقائياً
+    const box2 = document.createElement('div');
+    box2.className = 'box';
 
-    const priceHint = document.createElement('div');
-    priceHint.className = 'hint';
-    priceHint.textContent = 'سعر خاصية الإشعارات بالأوقية (اكتب 0 للتجربة المجانية)';
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.textContent = 'حصة الإشعارات الشهرية: عدد الإشعارات × سعر الإشعار الواحد بالأوقية';
 
-    const priceRow = document.createElement('div');
-    priceRow.className = 'price-row';
+    const r2 = document.createElement('div');
+    r2.className = 'box-row';
 
-    const priceInput = document.createElement('input');
-    priceInput.type = 'number';
-    priceInput.min = '0';
-    priceInput.step = '1';
-    priceInput.value = String(price);
-    priceInput.placeholder = 'مثال: 1000';
+    const qInput = document.createElement('input');
+    qInput.type = 'number';
+    qInput.min = '0';
+    qInput.step = '1';
+    qInput.value = String(quota);
+    qInput.placeholder = 'عدد الإشعارات';
+
+    const uInput = document.createElement('input');
+    uInput.type = 'number';
+    uInput.min = '0';
+    uInput.step = '1';
+    uInput.value = String(unit);
+    uInput.placeholder = 'سعر الإشعار';
+
+    const totalEl = document.createElement('span');
+    totalEl.className = 'total';
+    const refreshTotal = () => {
+      const q = Math.floor(Number(qInput.value) || 0);
+      const u = Math.floor(Number(uInput.value) || 0);
+      totalEl.textContent = 'الإجمالي: ' + (q * u) + ' أوقية';
+    };
+    qInput.addEventListener('input', refreshTotal);
+    uInput.addEventListener('input', refreshTotal);
+    refreshTotal();
 
     const saveBtn = document.createElement('button');
     saveBtn.className = 'btn green';
-    saveBtn.textContent = 'حفظ السعر';
-    saveBtn.addEventListener('click', () => savePrice(s, priceInput, saveBtn));
+    saveBtn.textContent = 'حفظ الحصة';
+    saveBtn.addEventListener('click', () => saveNotify(s, qInput, uInput, saveBtn));
 
-    const freeBtn = document.createElement('button');
-    freeBtn.className = 'btn gray';
-    freeBtn.textContent = 'تجربة مجانية (0)';
-    freeBtn.addEventListener('click', () => {
-      priceInput.value = '0';
-      savePrice(s, priceInput, freeBtn);
-    });
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'btn gray';
+    resetBtn.textContent = 'تصفير عداد الإشعارات';
+    resetBtn.addEventListener('click', () => resetNotify(s, resetBtn));
 
-    priceRow.append(priceInput, saveBtn, freeBtn);
-    priceBox.append(priceHint, priceRow);
-    row.appendChild(priceBox);
+    r2.append(qInput, uInput, totalEl, saveBtn, resetBtn);
+    box2.append(hint, r2);
+    row.appendChild(box2);
 
     const actions = document.createElement('div');
     actions.style.marginTop = '8px';
@@ -227,22 +246,35 @@ function renderList() {
   });
 }
 
-async function savePrice(s, input, btn) {
-  const raw = input.value.trim();
-  const value = Number(raw);
-  if (raw === '' || !Number.isInteger(value) || value < 0) {
-    return show('✗ اكتب رقماً صحيحاً أكبر من أو يساوي 0', 'err');
-  }
-  const label = value === 0 ? 'تجربة مجانية' : value + ' أوقية';
-  if (!confirm('تأكيد: سعر إشعارات ' + s.name + ' = ' + label + '؟')) return;
+async function saveNotify(s, qInput, uInput, btn) {
+  const q = Number(qInput.value);
+  const u = Number(uInput.value);
+  if (!Number.isInteger(q) || q < 0) return show('✗ عدد الإشعارات يجب أن يكون رقماً صحيحاً', 'err');
+  if (!Number.isInteger(u) || u < 0) return show('✗ سعر الإشعار يجب أن يكون رقماً صحيحاً', 'err');
+
+  if (!confirm('تأكيد: ' + s.name + ' — ' + q + ' إشعار × ' + u + ' أوقية = ' + (q * u) + ' أوقية؟')) return;
 
   btn.disabled = true;
   try {
-    await api('POST', { id: s.id, action: 'set_price', price: value });
-    show('✓ تم حفظ السعر لـ ' + s.name + ': ' + label, 'ok');
+    await api('POST', { id: s.id, action: 'notify_set', quota: q, unit_price: u });
+    show('✓ تم حفظ حصة الإشعارات لـ ' + s.name, 'ok');
     await load();
   } catch (e) {
-    show('✗ فشل حفظ السعر: ' + e.message, 'err');
+    show('✗ فشل الحفظ: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function resetNotify(s, btn) {
+  if (!confirm('تصفير عداد الإشعارات المستخدمة لـ ' + s.name + '؟')) return;
+  btn.disabled = true;
+  try {
+    await api('POST', { id: s.id, action: 'notify_reset' });
+    show('✓ تم تصفير عداد الإشعارات لـ ' + s.name, 'ok');
+    await load();
+  } catch (e) {
+    show('✗ فشل: ' + e.message, 'err');
   } finally {
     btn.disabled = false;
   }
