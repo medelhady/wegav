@@ -38,6 +38,13 @@ function normalize(text) {
     .trim();
 }
 
+// يوحّد الرقم إلى الصيغة الكاملة 222 + 8 أرقام
+function normalizePhone(p) {
+  const d = String(p || '').replace(/\D/g, '');
+  if (d.length === 8) return '222' + d;
+  return d;
+}
+
 function parseKeywords(text) {
   const list = String(text || '').split(/[,،\n]/).map(normalize).filter(Boolean);
   return [...new Set(list)];
@@ -103,6 +110,10 @@ const MSG = {
     'اكتب اسم متجرك كما تريد أن يظهر للزبائن.\n' +
     '(من 2 إلى 60 حرفاً)',
   registerNameInvalid: '⚠️ اسم المتجر يجب أن يكون بين 2 و 60 حرفاً. اكتب الاسم مرة أخرى.',
+  registerAlready:
+    '⚠️ *هذا الرقم مسجل مسبقاً كتاجر*\n\n' +
+    'اكتب *قائمة* لعرض متجرك، أو تواصل مع الإدارة إن احتجت مساعدة.',
+  registerFailed: '⚠️ *تعذر إتمام التسجيل*\n\nأعد المحاولة بعد قليل.',
   registerSuccess: (store) =>
     '🎉 *مبروك! تم تسجيل متجرك*\n\n' +
     '🏪 المتجر: *' + store.name + '*\n' +
@@ -394,11 +405,12 @@ async function generateMerchantCode(cfg) {
   throw new Error('no free merchant code');
 }
 
+// إنشاء متجر: الرقم يُحفظ دائماً بالصيغة الكاملة، والقيد في قاعدة البيانات يمنع التكرار
 async function createStore(cfg, phone, name) {
   const code = await generateMerchantCode(cfg);
   return sbInsert(cfg, 'stores', {
     name,
-    phone,
+    phone: normalizePhone(phone),
     merchant_code: code,
     status: 'active',
     plan: 'trial',
@@ -578,7 +590,7 @@ async function createAccessCode(cfg, storeId, topic, kind) {
 
 async function getAccessByCode(cfg, code) {
   const r = await fetch(
-    `${cfg.url}/rest/v1/access_codes?code=eq.${code}&select=id,store_id,topic,kind,bound_phone,revoked,expires_at`,
+    `${cfg.url}/rest/v1/access_codes?code=eq.${code}&select=id,code,store_id,topic,kind,bound_phone,revoked,expires_at`,
     { headers: sbHeaders(cfg.key) }
   );
   const rows = await r.json();
@@ -586,7 +598,6 @@ async function getAccessByCode(cfg, code) {
 }
 
 // ربط الكود الشخصي برقم الطالب أول مرة فقط
-// يعيد true إذا كان الكود للرقم نفسه أو تم ربطه الآن، وfalse إذا كان مرتبطاً برقم آخر
 async function bindPersonalCode(cfg, ac, phone) {
   if (ac.bound_phone === phone) return true;
   if (ac.bound_phone) return false;
@@ -1271,6 +1282,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   return sendText(cfg, phoneNumberId, from, MSG.saved(keywords));
 }
 
+// التسجيل: يوحّد الرقم، ويمنع التسجيل إذا كان الرقم مسجلاً مسبقاً
 async function handleRegistration(cfg, phoneNumberId, from, msg) {
   const type = msg.type;
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
@@ -1278,9 +1290,24 @@ async function handleRegistration(cfg, phoneNumberId, from, msg) {
   if (!text || text.length < 2 || text.length > 60) {
     return sendText(cfg, phoneNumberId, from, MSG.registerNameInvalid);
   }
-  const store = await createStore(cfg, from, text);
-  await resetSession(cfg, from);
-  return sendText(cfg, phoneNumberId, from, MSG.registerSuccess(store));
+
+  const phone = normalizePhone(from);
+  const existing = await getStoreByPhone(cfg, phone);
+  if (existing) {
+    await resetSession(cfg, from);
+    return sendText(cfg, phoneNumberId, from, MSG.registerAlready);
+  }
+
+  try {
+    const store = await createStore(cfg, phone, text);
+    await resetSession(cfg, from);
+    return sendText(cfg, phoneNumberId, from, MSG.registerSuccess(store));
+  } catch (err) {
+    console.error('register failed:', err?.message || err);
+    // قد يكون السبب قيد التكرار في قاعدة البيانات
+    await resetSession(cfg, from);
+    return sendText(cfg, phoneNumberId, from, MSG.registerAlready);
+  }
 }
 
 async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
@@ -1333,7 +1360,6 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     }
 
     if (ac.kind === 'personal') {
-      ac.code = up;
       const ok = await bindPersonalCode(cfg, ac, from);
       if (!ok) return sendText(cfg, phoneNumberId, from, MSG.accessBoundOther);
     }
@@ -1358,7 +1384,6 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
 
     await upsertCustomer(cfg, store.id, from);
 
-    // الزبون يرى العام، وخاصه حسب كوده: موضوع معين، أو كل الخاص للكود العام
     const access = store.private_enabled === false ? null : await getActiveAccess(cfg, session);
     const allowed = access ? (access.topic || 'ALL') : null;
 
