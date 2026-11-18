@@ -6,6 +6,8 @@ const KEYWORDS_MAX = 20;
 const KEYWORD_LEN_MAX = 60;
 const ALBUM_MAX = 10;
 const TRIAL_REPLIES = 50;
+const ACCESS_DAYS = 30;
+const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 const MEDIA_TYPES = ['audio', 'image', 'video'];
 const IGNORED_TYPES = ['unsupported', 'reaction', 'sticker', 'system', 'unknown', 'order', 'contacts', 'location', 'interactive', 'button'];
 const KIND_AR = { audio: 'صوت', image: 'صورة', video: 'فيديو' };
@@ -51,6 +53,7 @@ const WELCOME_CMD = normalize('ترحيب');
 const WELCOME_DEL_CMD = normalize('حذف الترحيب');
 const LINK_CMD = normalize('رابط');
 const LEAVE_CMD = normalize('تغيير المتجر');
+const ACCESS_CMD = normalize('كود دخول');
 
 const MSG = {
   customerWelcome:
@@ -68,6 +71,12 @@ const MSG = {
     '🤔 *لم أفهم طلبك*\n\n' +
     'اكتب كلمة من كلمات المتجر، أو اكتب *تغيير المتجر* لإدخال كود آخر.',
   codeInvalid: '❌ *الكود غير صحيح أو المتجر غير متاح*\n\nتأكد من الكود وأعد المحاولة.',
+  accessGranted: (name, exp) =>
+    '🔓 *تم تفعيل الوصول الخاص*\n\n' +
+    '🏪 ' + name + '\n' +
+    '📅 صالح حتى: ' + exp + '\n\n' +
+    'اكتب كلمة الرد للحصول عليه.',
+  accessInvalid: '❌ *كود الدخول غير صحيح أو منتهي الصلاحية*',
   storeStopped: '⛔ *حسابك موقوف حالياً*\n\nتواصل مع الإدارة لإعادة التفعيل.',
   registerAskName:
     '✍️ *تسجيل متجر جديد*\n\n' +
@@ -89,6 +98,17 @@ const MSG = {
     'شارك هذا الرابط مع زبائنك، عند الضغط عليه يفتح المحادثة مع كود متجرك جاهزاً:\n\n' +
     'https://wa.me/' + BOT_NUMBER + '?text=' + store.merchant_code + '\n\n' +
     '🔑 كودك: *' + store.merchant_code + '*',
+  accessCreated: (code, exp, privCount) =>
+    '🔑 *كود الدخول الخاص*\n\n' +
+    '*' + code + '*\n' +
+    '📅 صالح حتى: ' + exp + ' (شهر)\n\n' +
+    (privCount
+      ? '🔒 يفتح ' + privCount + ' رداً خاصاً.'
+      : '⚠️ لا توجد ردود خاصة بعد. اكتب *خاص رقم* لجعل الرد خاصاً.') +
+    '\n\nأعط هذا الكود للزبون المختار، ليكتبه للبوت.',
+  privateToggled: (n, isPrivate) =>
+    (isPrivate ? '🔒 تم جعل الرد رقم ' + n + ' *خاصاً*' : '🔓 تم جعل الرد رقم ' + n + ' *عاماً*') +
+    '\n\nالردود الخاصة تظهر فقط لمن يملك كود الدخول.',
   menu: (store, used, quota) =>
     '📋 *قائمة التاجر*\n' +
     '━━━━━━━━━━━━\n' +
@@ -96,6 +116,8 @@ const MSG = {
     '➕ *إضافة* ← رد جديد\n' +
     '✏️ *تعديل* ← تعديل رد موجود\n' +
     '🗑 *حذف 2* ← حذف الرد رقم 2\n' +
+    '🔒 *خاص 2* ← جعل الرد رقم 2 خاصاً أو عاماً\n' +
+    '🔑 *كود دخول* ← كود خاص صالح لشهر\n' +
     '🔗 *رابط* ← رابط مشاركة لزبائنك\n' +
     '📊 *حصتي* ← الردود المستخدمة والمتبقية\n' +
     '❌ *إلغاء* ← الخروج من أي خطوة\n' +
@@ -355,6 +377,58 @@ async function createStore(cfg, phone, name) {
   });
 }
 
+// كود دخول خاص للزبائن، صالح لمدة شهر
+function randomAccessCode() {
+  let s = '';
+  for (let i = 0; i < 6; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+  return s;
+}
+
+async function createAccessCode(cfg, storeId) {
+  const expires = new Date(Date.now() + ACCESS_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  for (let i = 0; i < 20; i++) {
+    const r = await fetch(`${cfg.url}/rest/v1/access_codes`, {
+      method: 'POST',
+      headers: { ...sbHeaders(cfg.key), Prefer: 'return=representation' },
+      body: JSON.stringify({ store_id: storeId, code: randomAccessCode(), expires_at: expires }),
+    });
+    const d = await r.json();
+    if (r.ok && Array.isArray(d) && d[0]) return d[0];
+  }
+  throw new Error('تعذر إنشاء كود الدخول');
+}
+
+async function getAccessCodeByCode(cfg, code) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/access_codes?code=eq.${code}&select=id,store_id,expires_at`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const rows = await r.json();
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
+// هل الزبون يملك كود دخول صالحاً لهذا المتجر الآن؟
+async function hasValidAccess(cfg, session) {
+  if (!session.access_code_id) return false;
+  const r = await fetch(
+    `${cfg.url}/rest/v1/access_codes?id=eq.${session.access_code_id}&select=store_id,expires_at`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const rows = await r.json();
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) return false;
+  return row.store_id === session.active_store_id && new Date(row.expires_at).getTime() > Date.now();
+}
+
+async function setReplyPrivate(cfg, id, value) {
+  const r = await fetch(`${cfg.url}/rest/v1/auto_replies?id=eq.${id}`, {
+    method: 'PATCH',
+    headers: { ...sbHeaders(cfg.key), Prefer: 'return=minimal' },
+    body: JSON.stringify({ is_private: value }),
+  });
+  if (!r.ok) throw new Error('private update failed');
+}
+
 async function findConflicts(cfg, storeId, keywords) {
   const r = await fetch(
     `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=keywords`,
@@ -370,10 +444,12 @@ async function findConflicts(cfg, storeId, keywords) {
   return [...hit];
 }
 
-async function findReplyForText(cfg, storeId, text) {
+// includePrivate = true يسمح بالبحث بين الردود الخاصة أيضاً
+async function findReplyForText(cfg, storeId, text, includePrivate = false) {
   const cleaned = normalize(text);
+  const privFilter = includePrivate ? '' : '&is_private=eq.false';
   const r = await fetch(
-    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords,kind,content,media_id,media_ids`,
+    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}${privFilter}&select=id,keywords,kind,content,media_id,media_ids`,
     { headers: sbHeaders(cfg.key) }
   );
   const rows = await r.json();
@@ -386,7 +462,7 @@ async function findReplyForText(cfg, storeId, text) {
 
 async function listStoreReplies(cfg, storeId) {
   const r = await fetch(
-    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords,kind,content,media_id,media_ids,created_at&order=created_at.asc`,
+    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&select=id,keywords,kind,content,media_id,media_ids,is_private,created_at&order=created_at.asc`,
     { headers: sbHeaders(cfg.key) }
   );
   const rows = await r.json();
@@ -411,7 +487,8 @@ function replyLabel(row) {
   } else {
     kind = (row.kind === 'image' ? '🖼 ' : row.kind === 'audio' ? '🎤 ' : '🎬 ') + (KIND_AR[row.kind] || 'ملف');
   }
-  return '*' + kw + '*\n    ' + kind;
+  const lock = row.is_private ? '🔒 ' : '';
+  return lock + '*' + kw + '*\n    ' + kind;
 }
 
 async function getReplyItems(cfg, replyId) {
@@ -550,6 +627,7 @@ async function sendReplyList(cfg, phoneNumberId, from, storeId) {
     '\n━━━━━━━━━━━━\n' +
     '✏️ اكتب *رقم* الرد للتعديل عليه\n' +
     '🗑 أو *حذف رقم* (مثال: حذف 2)\n' +
+    '🔒 أو *خاص رقم* لجعله خاصاً أو عاماً\n' +
     '❌ أو *إلغاء* للخروج';
 
   return sendText(cfg, phoneNumberId, from, body);
@@ -603,7 +681,7 @@ async function removeEditItem(cfg, phoneNumberId, from, session, index) {
   return sendEditMenu(cfg, phoneNumberId, from, session.edit_reply_id);
 }
 
-async function sendReply(cfg, phoneNumberId, to, row) {
+async function sendReply(cfg, phoneNumberId, to, row, includePrivate) {
   if (row.kind === 'text') return sendText(cfg, phoneNumberId, to, row.content);
 
   if (row.kind === 'album') {
@@ -744,6 +822,27 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       MSG.quota(store.replies_used || 0, store.replies_quota || 0));
   }
 
+  // كود دخول خاص لشهر واحد
+  if (cmd === ACCESS_CMD) {
+    const ac = await createAccessCode(cfg, store.id);
+    const privCount = (await listStoreReplies(cfg, store.id)).filter(r => r.is_private).length;
+    const exp = new Date(ac.expires_at).toISOString().slice(0, 10);
+    return sendText(cfg, phoneNumberId, from, MSG.accessCreated(ac.code, exp, privCount));
+  }
+
+  // خاص رقم: يجعل الرد خاصاً أو عاماً
+  const pm = cmd.match(/^خاص (\d+)$/);
+  if (pm) {
+    const list = await listStoreReplies(cfg, store.id);
+    const target = list[parseInt(pm[1], 10) - 1];
+    if (!target) {
+      return sendText(cfg, phoneNumberId, from, MSG.replyNumberNotFound);
+    }
+    const nv = !target.is_private;
+    await setReplyPrivate(cfg, target.id, nv);
+    return sendText(cfg, phoneNumberId, from, MSG.privateToggled(parseInt(pm[1], 10), nv));
+  }
+
   if (ADD_RE.test(cmdNoSpace)) {
     await resetSession(cfg, from, 'await_reply');
     return sendText(cfg, phoneNumberId, from, MSG.addStart);
@@ -864,7 +963,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
         return sendText(cfg, phoneNumberId, from, MSG.replyNumberNotFound);
       }
     } else {
-      row = await findReplyForText(cfg, store.id, text);
+      row = await findReplyForText(cfg, store.id, text, true);
       if (!row) {
         return sendText(cfg, phoneNumberId, from, MSG.replyNotFound);
       }
@@ -964,32 +1063,48 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.registerAskName);
   }
 
-  // الزبون يُنهي المتجر الحالي بنفسه
   if (cmd === LEAVE_CMD) {
-    await setSession(cfg, from, { state: 'idle', active_store_id: null });
+    await setSession(cfg, from, { state: 'idle', active_store_id: null, access_code_id: null });
     return sendText(cfg, phoneNumberId, from, MSG.storeLeft);
   }
 
-  // كود المتجر: يُحفظ في الجلسة، فلا يحتاج الزبون تكراره بعد ذلك
+  // كود متجر من 3 أرقام
   if (/^\d{3}$/.test(text)) {
     const store = await getStoreByCode(cfg, text);
     if (!store || store.status !== 'active') {
       return sendText(cfg, phoneNumberId, from, MSG.codeInvalid);
     }
-    await setSession(cfg, from, { state: 'customer', active_store_id: store.id });
+    await setSession(cfg, from, { state: 'customer', active_store_id: store.id, access_code_id: null });
     return sendWelcome(cfg, phoneNumberId, from, store);
   }
 
-  // الزبون داخل متجر محفوظ في الجلسة: نرد من هذا المتجر مباشرة
+  // كود دخول خاص من 6 أحرف
+  const up = text.toUpperCase();
+  if (/^[A-Z0-9]{6}$/.test(up)) {
+    const ac = await getAccessCodeByCode(cfg, up);
+    if (!ac || new Date(ac.expires_at).getTime() <= Date.now()) {
+      return sendText(cfg, phoneNumberId, from, MSG.accessInvalid);
+    }
+    const store = await getStoreById(cfg, ac.store_id);
+    if (!store || store.status !== 'active') {
+      return sendText(cfg, phoneNumberId, from, MSG.accessInvalid);
+    }
+    await setSession(cfg, from, { state: 'customer', active_store_id: store.id, access_code_id: ac.id });
+    return sendText(cfg, phoneNumberId, from,
+      MSG.accessGranted(store.name, new Date(ac.expires_at).toISOString().slice(0, 10)));
+  }
+
   if (session.active_store_id) {
     const store = await getStoreById(cfg, session.active_store_id);
     if (!store || store.status !== 'active') {
-      await setSession(cfg, from, { state: 'idle', active_store_id: null });
+      await setSession(cfg, from, { state: 'idle', active_store_id: null, access_code_id: null });
       return sendText(cfg, phoneNumberId, from, MSG.codeInvalid);
     }
 
+    const privateOk = await hasValidAccess(cfg, session);
+
     if (type === 'text' && text) {
-      const row = await findReplyForText(cfg, store.id, text);
+      const row = await findReplyForText(cfg, store.id, text, privateOk);
       if (row) return sendReply(cfg, phoneNumberId, from, row);
     }
     return sendText(cfg, phoneNumberId, from, MSG.customerUnknown);
