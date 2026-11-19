@@ -10,7 +10,7 @@ body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;color:#222}
 .card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:12px}
 h1{font-size:18px;margin:0 0 4px}
 .sub{font-size:13px;color:#666}
-input[type=password],input[type=text]{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-size:15px}
+input[type=password],input[type=text],input[type=number],select{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-size:15px;background:#fff}
 .btn{background:#1a73e8;color:#fff;border:0;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13px;font-weight:600;margin:2px;text-decoration:none;display:inline-block}
 .btn.gray{background:#fff;color:#333;border:1px solid #ccc}
 .btn.red{background:#fff;color:#d93025;border:1px solid #f1b3ad}
@@ -40,6 +40,9 @@ input[type=password],input[type=text]{width:100%;padding:10px;border:1px solid #
 .codes-row{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px dashed #eee;padding:8px 0;flex-wrap:wrap}
 .codes-row .code{font-weight:700;font-size:15px;direction:ltr}
 .codes-row .info{font-size:12px;color:#555}
+.mode-box{background:#f7f9fc;border:1px solid #dde4ee;border-radius:8px;padding:10px;margin-top:8px}
+.mode-box .hint{font-size:12px;color:#555;margin:6px 0}
+.mode-box .ok-line{font-size:13px;color:#188038;font-weight:700;margin-bottom:6px}
 #msg{font-size:13px;margin-top:8px;min-height:18px;white-space:pre-line}
 .ok{color:#188038}.err{color:#d93025}
 .hidden{display:none}
@@ -74,7 +77,7 @@ input[type=password],input[type=text]{width:100%;padding:10px;border:1px solid #
     <div class="stats">
       <div class="stat"><div class="k">إجمالي التجار</div><div class="v" id="s-total">0</div></div>
       <div class="stat"><div class="k">الفعّالون</div><div class="v" id="s-active">0</div></div>
-      <div class="stat"><div class="k">المدفوعون</div><div class="v" id="s-paid">0</div></div>
+      <div class="stat"><div class="k">على رقم خاص</div><div class="v" id="s-private-num">0</div></div>
       <div class="stat"><div class="k">الموقوفون</div><div class="v" id="s-susp">0</div></div>
     </div>
 
@@ -126,10 +129,14 @@ function fmtDate(iso) {
   return new Date(iso).toLocaleDateString('ar');
 }
 
+function hasPrivateNumber(s) {
+  return Boolean(s.wa_phone_number_id);
+}
+
 function renderStats() {
   $('s-total').textContent = stores.length;
   $('s-active').textContent = stores.filter(s => s.status === 'active').length;
-  $('s-paid').textContent = stores.filter(s => s.plan === 'paid').length;
+  $('s-private-num').textContent = stores.filter(hasPrivateNumber).length;
   $('s-susp').textContent = stores.filter(s => s.status === 'suspended').length;
 }
 
@@ -166,16 +173,19 @@ function renderList() {
     meta.className = 'meta';
     meta.textContent =
       'الهاتف: ' + (s.phone || '—') + '\n' +
+      'نوع الاستقبال: ' + (hasPrivateNumber(s) ? 'رقم خاص' : 'بوت مشترك') + '\n' +
       'الخطة: ' + (s.plan === 'paid' ? 'مدفوعة' : 'تجريبية') + ' | ' +
       'الردود: ' + s.replies_used + ' من ' + s.replies_quota + ' | ' +
       'الانتهاء: ' + fmtDate(s.plan_expires_at) + '\n' +
       'المحتوى الخاص: ' + (s.private_enabled ? 'مفعّل ✅' : 'موقوف ⛔') + '\n' +
       'الأكواد العامة: ' + (s.public_codes_enabled ? 'مفعّلة ✅' : 'موقوفة ⛔') + '\n' +
-      'الإشعارات: ' + used + ' من ' + quota + ' إشعار شهرياً';
+      'الإشعارات: ' + used + ' من ' + quota + ' إشعار شهرياً (' + (quota * unit) + ' أوقية)';
     info.appendChild(meta);
 
     top.appendChild(info);
     row.appendChild(top);
+
+    row.appendChild(buildModeBox(s));
 
     const box2 = document.createElement('div');
     box2.className = 'box';
@@ -261,6 +271,123 @@ function renderList() {
     row.appendChild(actions);
     box.appendChild(row);
   });
+}
+
+// صندوق نوع الاستقبال: بوت مشترك أو رقم خاص
+function buildModeBox(s) {
+  const box = document.createElement('div');
+  box.className = 'mode-box';
+
+  const title = document.createElement('div');
+  title.className = 'hint';
+  title.textContent = 'نوع الاستقبال';
+
+  const sel = document.createElement('select');
+  const optShared = document.createElement('option');
+  optShared.value = 'shared';
+  optShared.textContent = 'بوت مشترك (الزبون يراسل رقمنا بكود المتجر)';
+  const optPrivate = document.createElement('option');
+  optPrivate.value = 'private';
+  optPrivate.textContent = 'رقم خاص (الرسائل تصل إلى رقم التاجر)';
+  sel.append(optShared, optPrivate);
+  sel.value = hasPrivateNumber(s) ? 'private' : 'shared';
+
+  const detail = document.createElement('div');
+
+  const renderDetail = () => {
+    detail.innerHTML = '';
+    if (sel.value === 'private') {
+      if (hasPrivateNumber(s)) {
+        const ok = document.createElement('div');
+        ok.className = 'ok-line';
+        ok.textContent = 'متصل ✅ ' + (s.wa_display_phone || '') + (s.wa_verified_name ? ' | ' + s.wa_verified_name : '');
+        detail.appendChild(ok);
+      }
+
+      const hint = document.createElement('div');
+      hint.className = 'hint';
+      hint.textContent = hasPrivateNumber(s)
+        ? 'لتغيير الرقم أدخل معرّفاً وتوكناً جديدين ثم اضغط ربط.'
+        : 'أدخل معرّف الرقم (Phone Number ID) والتوكن اللذين أرسلهما التاجر، ثم اضغط ربط وفحص.';
+
+      const pid = document.createElement('input');
+      pid.type = 'text';
+      pid.placeholder = 'Phone Number ID';
+      pid.style.marginBottom = '6px';
+
+      const tok = document.createElement('input');
+      tok.type = 'password';
+      tok.placeholder = 'التوكن (Access Token)';
+      tok.style.marginBottom = '6px';
+
+      const connectBtn = document.createElement('button');
+      connectBtn.className = 'btn green';
+      connectBtn.textContent = 'ربط وفحص';
+      connectBtn.addEventListener('click', () => connectNumber(s, pid, tok, connectBtn));
+
+      detail.append(hint, pid, tok, connectBtn);
+    } else {
+      const hint = document.createElement('div');
+      hint.className = 'hint';
+      hint.textContent = 'الزبائن يراسلون رقم البوت المشترك ويدخلون كود المتجر. لا يحتاج التاجر إعداداً تقنياً.';
+      detail.appendChild(hint);
+
+      if (hasPrivateNumber(s)) {
+        const disconnectBtn = document.createElement('button');
+        disconnectBtn.className = 'btn red';
+        disconnectBtn.textContent = 'تحويل إلى بوت مشترك (فصل الرقم الخاص)';
+        disconnectBtn.addEventListener('click', () => disconnectNumber(s, disconnectBtn));
+        detail.appendChild(disconnectBtn);
+      }
+    }
+  };
+
+  sel.addEventListener('change', () => {
+    if (sel.value === 'shared' && hasPrivateNumber(s)) {
+      renderDetail();
+      return;
+    }
+    renderDetail();
+  });
+
+  renderDetail();
+  box.append(title, sel, detail);
+  return box;
+}
+
+async function connectNumber(s, pidInput, tokInput, btn) {
+  const pid = pidInput.value.trim();
+  const token = tokInput.value.trim();
+  if (!pid) return show('✗ أدخل معرّف الرقم (Phone Number ID)', 'err');
+  if (!token) return show('✗ أدخل التوكن', 'err');
+  if (!confirm('ربط رقم ' + s.name + ' بهذا المعرّف؟ سيُفحص الاتصال أولاً.')) return;
+
+  btn.disabled = true;
+  btn.textContent = '… جاري الفحص';
+  try {
+    const data = await api('POST', { id: s.id, action: 'wa_connect', phone_number_id: pid, token });
+    show('✓ تم ربط الرقم ' + (data.display || '') + ' لـ ' + s.name, 'ok');
+    tokInput.value = '';
+    await load();
+  } catch (e) {
+    show('✗ فشل الربط: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'ربط وفحص';
+  }
+}
+
+async function disconnectNumber(s, btn) {
+  if (!confirm('تحويل ' + s.name + ' إلى البوت المشترك؟ سيُفصل الرقم الخاص، وتبقى الردود والزبائن كما هي.')) return;
+  btn.disabled = true;
+  try {
+    await api('POST', { id: s.id, action: 'wa_disconnect' });
+    show('✓ تم تحويل ' + s.name + ' إلى البوت المشترك', 'ok');
+    await load();
+  } catch (e) {
+    show('✗ فشل: ' + e.message, 'err');
+    btn.disabled = false;
+  }
 }
 
 async function renderCodes() {
