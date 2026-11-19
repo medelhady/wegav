@@ -1,3 +1,5 @@
+const GRAPH = 'https://graph.facebook.com/v21.0';
+
 function sbHeaders(key) {
   return { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json' };
 }
@@ -39,6 +41,24 @@ function toInt(v, max) {
   return n;
 }
 
+// فحص الرقم والتوكن قبل الحفظ: يعيد اسم الرقم أو سبب الفشل
+async function verifyWhatsAppNumber(phoneNumberId, token) {
+  const r = await fetch(
+    `${GRAPH}/${phoneNumberId}?fields=display_phone_number,verified_name`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.id) {
+    const msg = d?.error?.message || 'تعذر الوصول إلى الرقم بهذا التوكن';
+    return { ok: false, error: msg };
+  }
+  return {
+    ok: true,
+    display: d.display_phone_number || '',
+    verified_name: d.verified_name || '',
+  };
+}
+
 export default async function handler(req, res) {
   try {
     const url = (process.env.SUPABASE_URL || '').trim();
@@ -56,7 +76,6 @@ export default async function handler(req, res) {
     if (pass !== adminPass) return res.status(401).json({ error: 'كلمة السر غير صحيحة' });
 
     if (req.method === 'GET') {
-      // قائمة الأكواد النشطة: ?codes=1
       if (req.query && req.query.codes === '1') {
         const now = encodeURIComponent(new Date().toISOString());
         const r = await fetch(
@@ -68,8 +87,9 @@ export default async function handler(req, res) {
         return res.status(200).json({ items: data });
       }
 
+      // لا نعيد التوكن أبداً، فقط هل هو موجود وبيانات الرقم المربوط
       const r = await fetch(
-        `${url}/rest/v1/stores?select=id,name,phone,merchant_code,status,plan,replies_quota,replies_used,plan_expires_at,private_enabled,public_codes_enabled,notify_quota,notify_unit_price,notify_used,created_at&order=created_at.desc`,
+        `${url}/rest/v1/stores?select=id,name,phone,merchant_code,status,plan,replies_quota,replies_used,plan_expires_at,private_enabled,public_codes_enabled,notify_quota,notify_unit_price,notify_used,wa_phone_number_id,wa_display_phone,wa_verified_name,created_at&order=created_at.desc`,
         { headers: sbHeaders(key) }
       );
       const data = await r.json();
@@ -80,7 +100,6 @@ export default async function handler(req, res) {
     if (req.method === 'POST') {
       const action = String(body.action || '');
 
-      // إلغاء كود معين: يستخدم معرّف الكود وليس معرّف المتجر
       if (action === 'revoke_code') {
         const cid = String(body.code_id || '');
         if (!/^[0-9a-f-]{36}$/i.test(cid)) return res.status(400).json({ error: 'Invalid code id' });
@@ -108,6 +127,61 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'اسم التأكيد غير مطابق' });
         }
         await deleteStoreData(url, key, id);
+        return res.status(200).json({ ok: true });
+      }
+
+      // ربط رقم التاجر: نتحقق من الرقم والتوكن أولاً، ثم نحفظهما
+      if (action === 'wa_connect') {
+        const phoneNumberId = String(body.phone_number_id || '').trim();
+        const token = String(body.token || '').trim();
+        if (!/^\d{5,25}$/.test(phoneNumberId)) {
+          return res.status(400).json({ error: 'معرّف الرقم (Phone Number ID) غير صالح' });
+        }
+        if (token.length < 20) {
+          return res.status(400).json({ error: 'التوكن قصير جداً' });
+        }
+
+        const check = await verifyWhatsAppNumber(phoneNumberId, token);
+        if (!check.ok) {
+          return res.status(400).json({ error: 'فشل التحقق: ' + check.error });
+        }
+
+        const r = await fetch(`${url}/rest/v1/stores?id=eq.${id}`, {
+          method: 'PATCH',
+          headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            wa_phone_number_id: phoneNumberId,
+            wa_token: token,
+            wa_display_phone: check.display,
+            wa_verified_name: check.verified_name,
+          }),
+        });
+        if (!r.ok) {
+          const text = await r.text();
+          if (text.includes('duplicate') || text.includes('23505')) {
+            return res.status(400).json({ error: 'هذا المعرّف مربوط بمتجر آخر' });
+          }
+          return res.status(500).json({ error: 'فشل الحفظ' });
+        }
+        return res.status(200).json({
+          ok: true,
+          display: check.display,
+          verified_name: check.verified_name,
+        });
+      }
+
+      if (action === 'wa_disconnect') {
+        const r = await fetch(`${url}/rest/v1/stores?id=eq.${id}`, {
+          method: 'PATCH',
+          headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
+          body: JSON.stringify({
+            wa_phone_number_id: null,
+            wa_token: null,
+            wa_display_phone: null,
+            wa_verified_name: null,
+          }),
+        });
+        if (!r.ok) return res.status(500).json({ error: 'فشل فصل الرقم' });
         return res.status(200).json({ ok: true });
       }
 
