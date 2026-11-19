@@ -346,12 +346,23 @@ async function appendWelcomeMedia(cfg, phone, mediaId) {
   if (!r.ok) throw new Error('welcome append failed');
 }
 
-const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_text,welcome_media_ids,private_enabled,public_codes_enabled,notify_quota,notify_used';
+const STORE_FIELDS = 'id,name,status,merchant_code,replies_quota,replies_used,welcome_text,welcome_media_ids,private_enabled,public_codes_enabled,notify_quota,notify_used,wa_phone_number_id,wa_token';
 
 async function getStoreById(cfg, id) {
   const r = await fetch(`${cfg.url}/rest/v1/stores?id=eq.${id}&select=${STORE_FIELDS}`, {
     headers: sbHeaders(cfg.key),
   });
+  const rows = await r.json();
+  return Array.isArray(rows) && rows[0] ? rows[0] : null;
+}
+
+// المتجر الذي ربط تاجره رقمه الخاص بمعرّف الرقم المستقبِل
+async function getStoreByWaNumber(cfg, phoneNumberId) {
+  if (!phoneNumberId) return null;
+  const r = await fetch(
+    `${cfg.url}/rest/v1/stores?wa_phone_number_id=eq.${encodeURIComponent(phoneNumberId)}&select=${STORE_FIELDS}`,
+    { headers: sbHeaders(cfg.key) }
+  );
   const rows = await r.json();
   return Array.isArray(rows) && rows[0] ? rows[0] : null;
 }
@@ -405,7 +416,6 @@ async function generateMerchantCode(cfg) {
   throw new Error('no free merchant code');
 }
 
-// إنشاء متجر: الرقم يُحفظ دائماً بالصيغة الكاملة، والقيد في قاعدة البيانات يمنع التكرار
 async function createStore(cfg, phone, name) {
   const code = await generateMerchantCode(cfg);
   return sbInsert(cfg, 'stores', {
@@ -419,7 +429,6 @@ async function createStore(cfg, phone, name) {
   });
 }
 
-// تسجيل الزبون في قائمة مشتركي المتجر، أو تحديث آخر تواصل معه
 async function upsertCustomer(cfg, storeId, phone, subscribed) {
   const body = { store_id: storeId, phone, last_seen_at: new Date().toISOString() };
   if (subscribed !== undefined) body.subscribed = subscribed;
@@ -431,7 +440,6 @@ async function upsertCustomer(cfg, storeId, phone, subscribed) {
   if (!r.ok) console.error('customer upsert failed', r.status);
 }
 
-// تسجيل من دخل بكود، ليصله إشعار موضوعه
 async function redeemAccess(cfg, accessId, storeId, phone) {
   const r = await fetch(`${cfg.url}/rest/v1/access_redemptions?on_conflict=access_code_id,phone`, {
     method: 'POST',
@@ -441,7 +449,6 @@ async function redeemAccess(cfg, accessId, storeId, phone) {
   if (!r.ok) console.error('redeem failed', r.status);
 }
 
-// المستلمون: كل المشتركين للإشعارات العامة، ومن لديه كود نشط للموضوع للخاصة
 async function getRecipients(cfg, storeId, topic) {
   const r = await fetch(
     `${cfg.url}/rest/v1/store_customers?store_id=eq.${storeId}&subscribed=eq.true&select=phone&limit=10000`,
@@ -530,7 +537,6 @@ async function findConflicts(cfg, storeId, keywords) {
   return [...hit];
 }
 
-// allowedTopic: 'ALL' لكل الردود (للتاجر والكود العام للمتجر)، وnull للزبون بلا كود، واسم الموضوع للزبون بكود
 async function findReplyForText(cfg, storeId, text, allowedTopic) {
   const cleaned = normalize(text);
   const rows = await listStoreReplies(cfg, storeId);
@@ -567,7 +573,6 @@ function randomAccessCode() {
   }
 }
 
-// kind: 'personal' أو 'public'، وtopic يكون null للكود العام للمتجر كله
 async function createAccessCode(cfg, storeId, topic, kind) {
   const expires = new Date(Date.now() + ACCESS_DAYS * 24 * 60 * 60 * 1000).toISOString();
   for (let i = 0; i < 30; i++) {
@@ -597,7 +602,6 @@ async function getAccessByCode(cfg, code) {
   return Array.isArray(rows) && rows[0] ? rows[0] : null;
 }
 
-// ربط الكود الشخصي برقم الطالب أول مرة فقط
 async function bindPersonalCode(cfg, ac, phone) {
   if (ac.bound_phone === phone) return true;
   if (ac.bound_phone) return false;
@@ -617,7 +621,6 @@ async function bindPersonalCode(cfg, ac, phone) {
   return Boolean(fresh && fresh.bound_phone === phone);
 }
 
-// الوصول النشط للزبون: نفس المتجر، ولم تنتهِ الصلاحية، ولم يُلغَ
 async function getActiveAccess(cfg, session) {
   if (!session.access_code_id) return null;
   const r = await fetch(
@@ -998,7 +1001,6 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       MSG.quota(store.replies_used || 0, store.replies_quota || 0));
   }
 
-  // إشعار 2: يرسل الرد رقم 2 لجميع المشتركين، ويُحتسب من حصة الإشعارات
   const nm = cmd.match(NOTIFY_RE);
   if (nm) {
     if (!store.notify_quota) {
@@ -1024,13 +1026,11 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.notifyDone(phones.length, quota - used - 1));
   }
 
-  // ميزة المحتوى الخاص: الأدمن يوقفها لكل تاجر
   const isPrivateCmd = /^كود /.test(spaced) || /^خاص /.test(spaced);
   if (isPrivateCmd && store.private_enabled === false) {
     return sendText(cfg, phoneNumberId, from, MSG.privateDisabled);
   }
 
-  // كود عام [موضوع]: كود يستخدمه أي رقم، ويحتاج تفعيل الأدمن
   const pubCodeM = spaced.match(/^كود عام(?: (.+))?$/);
   if (pubCodeM) {
     if (store.public_codes_enabled !== true) {
@@ -1046,7 +1046,6 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       MSG.accessCreated(ac.code, topic || 'كل المحتوى الخاص', exp, 'public'));
   }
 
-  // كود دورة1: كود شخصي يُربط بأول رقم يستخدمه
   const codeM = spaced.match(/^كود (.+)$/);
   if (codeM) {
     const topic = codeM[1].trim().slice(0, TOPIC_MAX);
@@ -1059,7 +1058,6 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.accessCreated(ac.code, topic, exp, 'personal'));
   }
 
-  // خاص 2 دورة1: يجعل الرد خاصاً بموضوع
   const privM = spaced.match(/^خاص (\d+) (.+)$/);
   if (privM) {
     const n = parseInt(privM[1], 10);
@@ -1075,7 +1073,6 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.privateUsage);
   }
 
-  // عام 2: يجعل الرد عاماً
   const pubM = spaced.match(/^عام (\d+)$/);
   if (pubM) {
     const n = parseInt(pubM[1], 10);
@@ -1282,7 +1279,6 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
   return sendText(cfg, phoneNumberId, from, MSG.saved(keywords));
 }
 
-// التسجيل: يوحّد الرقم، ويمنع التسجيل إذا كان الرقم مسجلاً مسبقاً
 async function handleRegistration(cfg, phoneNumberId, from, msg) {
   const type = msg.type;
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
@@ -1304,7 +1300,6 @@ async function handleRegistration(cfg, phoneNumberId, from, msg) {
     return sendText(cfg, phoneNumberId, from, MSG.registerSuccess(store));
   } catch (err) {
     console.error('register failed:', err?.message || err);
-    // قد يكون السبب قيد التكرار في قاعدة البيانات
     await resetSession(cfg, from);
     return sendText(cfg, phoneNumberId, from, MSG.registerAlready);
   }
@@ -1336,7 +1331,6 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendText(cfg, phoneNumberId, from, on ? MSG.customerSubscribed : MSG.customerUnsubscribed);
   }
 
-  // كود متجر: 3 أرقام فقط
   if (/^\d{3}$/.test(text)) {
     const store = await getStoreByCode(cfg, text);
     if (!store || store.status !== 'active') {
@@ -1347,7 +1341,6 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendWelcome(cfg, phoneNumberId, from, store);
   }
 
-  // كود دخول: 3 أحرف/أرقام، وفيه حرف على الأقل (شخصي أو عام)
   const up = text.replace(/\s/g, '').toUpperCase();
   if (/^[A-Z0-9]{3}$/.test(up) && /[A-Z]/.test(up)) {
     const ac = await getAccessByCode(cfg, up);
@@ -1397,17 +1390,88 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
   return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
 }
 
+// زبائن الرقم الخاص: يعملون داخل متجر واحد فقط، ويُرد عليهم بتوكن التاجر
+async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
+  if (IGNORED_TYPES.includes(msg.type)) return;
+
+  const type = msg.type;
+  const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
+  const cmd = normalize(text);
+
+  if (store.status !== 'active') {
+    return sendText(pcfg, pid, from, MSG.storeStopped);
+  }
+
+  if (cmd === SUB_OFF_CMD || cmd === SUB_ON_CMD) {
+    const on = cmd === SUB_ON_CMD;
+    await upsertCustomer(pcfg, store.id, from, on);
+    return sendText(pcfg, pid, from, on ? MSG.customerSubscribed : MSG.customerUnsubscribed);
+  }
+
+  // أول رسالة من هذا الرقم: ترحيب المتجر
+  if (session.active_store_id !== store.id) {
+    await setSession(pcfg, from, { state: 'customer', active_store_id: store.id, access_code_id: null });
+    await upsertCustomer(pcfg, store.id, from);
+    return sendWelcome(pcfg, pid, from, store);
+  }
+
+  await upsertCustomer(pcfg, store.id, from);
+
+  // كود دخول خاص يعمل لهذا المتجر فقط
+  const up = text.replace(/\s/g, '').toUpperCase();
+  if (/^[A-Z0-9]{3}$/.test(up) && /[A-Z]/.test(up)) {
+    const ac = await getAccessByCode(pcfg, up);
+    if (
+      !ac || ac.revoked || ac.store_id !== store.id ||
+      new Date(ac.expires_at).getTime() <= Date.now() ||
+      store.private_enabled === false
+    ) {
+      return sendText(pcfg, pid, from, MSG.accessInvalid);
+    }
+    if (ac.kind === 'personal') {
+      const ok = await bindPersonalCode(pcfg, ac, from);
+      if (!ok) return sendText(pcfg, pid, from, MSG.accessBoundOther);
+    }
+    await setSession(pcfg, from, { state: 'customer', active_store_id: store.id, access_code_id: ac.id });
+    await redeemAccess(pcfg, ac.id, store.id, from);
+    return sendText(pcfg, pid, from,
+      MSG.accessGranted(
+        store.name,
+        ac.topic || 'كل المحتوى الخاص',
+        new Date(ac.expires_at).toISOString().slice(0, 10)
+      ));
+  }
+
+  const access = store.private_enabled === false ? null : await getActiveAccess(pcfg, session);
+  const allowed = access ? (access.topic || 'ALL') : null;
+
+  if (type === 'text' && text) {
+    const row = await findReplyForText(pcfg, store.id, text, allowed);
+    if (row) return sendReply(pcfg, pid, from, row);
+  }
+  return sendText(pcfg, pid, from, MSG.customerUnknown);
+}
+
 async function handleMessage(cfg, phoneNumberId, msg) {
   await loadBotMessages(cfg);
 
   const from = String(msg.from || '');
   const session = await getSession(cfg, from);
 
+  // 1) تاجر يكتب أوامره من رقمه الشخصي المسجل
   const store = await getStoreByPhone(cfg, from);
   if (store) {
     return handleMerchant(cfg, phoneNumberId, from, store, msg, session);
   }
 
+  // 2) رسالة وصلت إلى رقم خاص بتاجر: نرد بتوكن ذلك التاجر
+  const privateStore = await getStoreByWaNumber(cfg, phoneNumberId);
+  if (privateStore && privateStore.wa_token) {
+    const pcfg = { ...cfg, token: privateStore.wa_token };
+    return handlePrivateCustomer(pcfg, phoneNumberId, from, privateStore, msg, session);
+  }
+
+  // 3) البوت المشترك
   if (session.state === 'await_store_name') {
     return handleRegistration(cfg, phoneNumberId, from, msg);
   }
