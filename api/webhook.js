@@ -38,7 +38,6 @@ function normalize(text) {
     .trim();
 }
 
-// يوحّد الرقم إلى الصيغة الكاملة 222 + 8 أرقام
 function normalizePhone(p) {
   const d = String(p || '').replace(/\D/g, '');
   if (d.length === 8) return '222' + d;
@@ -356,7 +355,6 @@ async function getStoreById(cfg, id) {
   return Array.isArray(rows) && rows[0] ? rows[0] : null;
 }
 
-// المتجر الذي ربط تاجره رقمه الخاص بمعرّف الرقم المستقبِل
 async function getStoreByWaNumber(cfg, phoneNumberId) {
   if (!phoneNumberId) return null;
   const r = await fetch(
@@ -438,6 +436,16 @@ async function upsertCustomer(cfg, storeId, phone, subscribed) {
     body: JSON.stringify(body),
   });
   if (!r.ok) console.error('customer upsert failed', r.status);
+}
+
+// يعيد true إذا كان الزبون جديداً في هذا المتجر (لم يكن مسجلاً من قبل)
+async function isNewCustomer(cfg, storeId, phone) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/store_customers?store_id=eq.${storeId}&phone=eq.${phone}&select=id&limit=1`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  const rows = await r.json();
+  return !(Array.isArray(rows) && rows.length > 0);
 }
 
 async function redeemAccess(cfg, accessId, storeId, phone) {
@@ -1390,7 +1398,7 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
   return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
 }
 
-// زبائن الرقم الخاص: يعملون داخل متجر واحد فقط، ويُرد عليهم بتوكن التاجر
+// زبائن الرقم الخاص: أول رسالة من أي رقم ترسل ترحيب المتجر تلقائياً
 async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
   if (IGNORED_TYPES.includes(msg.type)) return;
 
@@ -1408,8 +1416,11 @@ async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
     return sendText(pcfg, pid, from, on ? MSG.customerSubscribed : MSG.customerUnsubscribed);
   }
 
-  // أول رسالة من هذا الرقم: ترحيب المتجر
-  if (session.active_store_id !== store.id) {
+  // زبون جديد لهذا المتجر، أو لم يُفعَّل بعد في هذه الجلسة: يُرسل الترحيب
+  const newcomer = await isNewCustomer(pcfg, store.id, from);
+  const inThisStore = session.active_store_id === store.id;
+
+  if (newcomer || !inThisStore) {
     await setSession(pcfg, from, { state: 'customer', active_store_id: store.id, access_code_id: null });
     await upsertCustomer(pcfg, store.id, from);
     return sendWelcome(pcfg, pid, from, store);
@@ -1417,7 +1428,6 @@ async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
 
   await upsertCustomer(pcfg, store.id, from);
 
-  // كود دخول خاص يعمل لهذا المتجر فقط
   const up = text.replace(/\s/g, '').toUpperCase();
   if (/^[A-Z0-9]{3}$/.test(up) && /[A-Z]/.test(up)) {
     const ac = await getAccessByCode(pcfg, up);
@@ -1449,7 +1459,9 @@ async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
     const row = await findReplyForText(pcfg, store.id, text, allowed);
     if (row) return sendReply(pcfg, pid, from, row);
   }
-  return sendText(pcfg, pid, from, MSG.customerUnknown);
+
+  // كلمة لا تطابق شيئاً: نعيد الترحيب بدل رسالة "لم أفهم"
+  return sendWelcome(pcfg, pid, from, store);
 }
 
 async function handleMessage(cfg, phoneNumberId, msg) {
@@ -1458,20 +1470,17 @@ async function handleMessage(cfg, phoneNumberId, msg) {
   const from = String(msg.from || '');
   const session = await getSession(cfg, from);
 
-  // 1) تاجر يكتب أوامره من رقمه الشخصي المسجل
   const store = await getStoreByPhone(cfg, from);
   if (store) {
     return handleMerchant(cfg, phoneNumberId, from, store, msg, session);
   }
 
-  // 2) رسالة وصلت إلى رقم خاص بتاجر: نرد بتوكن ذلك التاجر
   const privateStore = await getStoreByWaNumber(cfg, phoneNumberId);
   if (privateStore && privateStore.wa_token) {
     const pcfg = { ...cfg, token: privateStore.wa_token };
     return handlePrivateCustomer(pcfg, phoneNumberId, from, privateStore, msg, session);
   }
 
-  // 3) البوت المشترك
   if (session.state === 'await_store_name') {
     return handleRegistration(cfg, phoneNumberId, from, msg);
   }
