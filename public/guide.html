@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>دليل ربط رقم تاجر جديد</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;color:#222}
+.wrap{max-width:760px;margin:0 auto;padding:16px}
+.card{background:#fff;border-radius:12px;padding:18px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:12px}
+h1{font-size:20px;margin:0 0 6px}
+h2{font-size:16px;margin:0 0 10px;color:#1a73e8}
+.sub{font-size:13px;color:#666;line-height:1.7}
+.step{border-bottom:1px dashed #eee;padding:12px 0}
+.step:last-child{border-bottom:0}
+.step-title{font-weight:700;font-size:14px;margin-bottom:4px}
+.step-text{font-size:13px;color:#444;line-height:1.8}
+.btn{display:inline-block;background:#1a73e8;color:#fff;text-decoration:none;border-radius:8px;padding:7px 12px;font-size:13px;font-weight:600;margin-top:6px}
+.btn.gray{background:#fff;color:#333;border:1px solid #ccc}
+.btn.green{background:#188038}
+.note{background:#fef7e0;border:1px solid #f5d37a;border-radius:8px;padding:10px;font-size:13px;color:#5f4300;line-height:1.7;margin-top:8px}
+.tip{background:#e6f4ea;border:1px solid #a8d5b5;border-radius:8px;padding:10px;font-size:13px;color:#1e5b2b;line-height:1.7;margin-top:8px}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="card top">
+    <div>
+      <h1>دليل ربط رقم تاجر جديد</h1>
+      <div class="sub">اتبع الخطوات بالترتيب. كل زر يفتح الصفحة المطلوبة مباشرة.</div>
+    </div>
+    <a class="btn gray" href="/admin.html">العودة للوحة الإدارة</a>
+  </div>
+
+  <div class="card">
+    <h2>المرحلة أ: إعداد Meta للتاجر</h2>
+
+    <div class="step">
+      <div class="step-title">1. فتح Business Portfolio للتاجر</div>
+      <div class="step-text">ادخل بحساب التاجر، واختر Portfolio الخاص بمتجره. إن لم يكن موجوداً أنشئ واحداً باسم المتجر.</div>
+      <a class="btn" href="https://business.facebook.com" target="_blank" rel="noopener">فتح Business Suite</a>
+    </div>
+
+    <div class="step">
+      <div class="step-title">2. تحديث معلومات النشاط</div>
+      <div class="step-text">أضف معلومات الاتصال (البريد، الهاتف، الموقع إن وُجد). بدونها يرفض Meta إنشاء حساب الواتساب.</div>
+      <a class="btn gray" href="https://business.facebook.com/settings/info" target="_blank" rel="noopener">معلومات النشاط</a>
+    </div>
+
+    <div class="step">
+      <div class="step-title">3. إنشاء حساب واتساب للأعمال وإضافة الرقم</div>
+      <div class="step-text">من Accounts > WhatsApp accounts اضغط Add، واختر Add a new number. أدخل رقماً لم يُستخدم في واتساب من قبل، ثم تحقق منه برمز (رسالة أو مكالمة).</div>
+      <a class="btn gray" href="https://business.facebook.com/settings/whatsapp-business-accounts" target="_blank" rel="noopener">حسابات واتساب</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>المرحلة ب: تطبيق العميل وتوكن دائم</h2>
+
+    <div class="step">
+      <div class="step-title">4. إنشاء تطبيق للعميل</div>
+      <div class="step-text">Create App ثم Business. اختر حالة الاستخدام Connect with customers through WhatsApp، واربطها بـ Portfolio التاجر.</div>
+      <a class="btn" href="https://developers.facebook.com/apps" target="_blank" rel="noopener">فتح Meta Apps</a>
+    </div>
+
+    <div class="step">
+      <div class="step-title">5. إنشاء System User</div>
+      <div class="step-text">أضف مستخدم نظام باسم متجر العميل بدور Employee، وامنحه التطبيق وحساب الواتساب بصلاحية Full control.</div>
+      <a class="btn gray" href="https://business.facebook.com/settings/system-users" target="_blank" rel="noopener">System Users</a>
+    </div>
+
+    <div class="step">
+      <div class="step-title">6. توليد التوكن الدائم</div>
+      <div class="step-text">من المستخدم اضغط Generate token، واختر تطبيق العميل، وفعّل الصلاحيات: whatsapp_business_management و whatsapp_business_messaging. انسخ التوكن فوراً، فلن يُعرض مرة أخرى.</div>
+      <div class="note">لا ترسل التوكن في أي محادثة أو رسالة. الصقه مباشرة في لوحة الإدارة.</div>
+    </div>
+
+    <div class="step">
+      <div class="step-title">7. جلب معرّف الرقم ومعرّف الحساب</div>
+      <div class="step-text">Phone Number ID من صفحة API Setup لتطبيق العميل. WABA ID من تفاصيل حساب الواتساب داخل Portfolio.</div>
+      <a class="btn gray" href="https://developers.facebook.com/apps" target="_blank" rel="noopener">API Setup للتطبيق</a>
+    </div>
+
+    <div class="step">
+      <div class="step-title">8. اشتراك التطبيق في حساب الواتساب</div>
+      <div class="step-text">في Graph API Explorer اختر تطبيق العميل وغيّر الطريقة إلى POST، واكتب المسار:<br>
+      <b>{WABA_ID}/subscribed_apps</b><br>
+      النتيجة المطلوبة: <b>success: true</b>. إن ظهر <b>data: []</b> فلم يُنفَّذ الاشتراك بعد.</div>
+      <a class="btn gray" href="https://developers.facebook.com/tools/explorer" target="_blank" rel="noopener">Graph API Explorer</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>المرحلة ج: في لوحة الإدارة</h2>
+
+    <div class="step">
+      <div class="step-title">9. ربط الرقم بالتاجر</div>
+      <div class="step-text">افتح التاجر في لوحة الإدارة، واجعل نوع الاستقبال <b>رقم خاص</b>، ثم الصق Phone Number ID والتوكن الدائم، واضغط <b>ربط وفحص</b>.</div>
+      <a class="btn green" href="/admin.html">فتح لوحة الإدارة</a>
+    </div>
+
+    <div class="step">
+      <div class="step-title">10. التأكد من الحالة</div>
+      <div class="step-text">يجب أن تظهر الحالة <b>متصل ✅</b> مع رقم التاجر واسم الحساب.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>المرحلة د: اختبار سريع</h2>
+
+    <div class="step">
+      <div class="step-title">11. اختبار الاستقبال والرد</div>
+      <div class="step-text">من رقم مختبَر أرسل <b>مرحبا</b> إلى رقم التاجر. يجب أن يصله الترحيب، ثم أرسل كلمة من كلمات المتجر ليصله الرد.</div>
+    </div>
+
+    <div class="step">
+      <div class="step-title">12. إعطاء التاجر ما يحتاجه</div>
+      <div class="step-text">أرسل له رسالة الترحيب الجاهزة، وأخبره أن يضيف ردوده من داخل المنصة أو يرسلها لك لإضافتها.</div>
+      <a class="btn gray" href="/messages.html">رسائل البوت</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>ملاحظات مهمة</h2>
+    <div class="note">
+      <b>التوكن المؤقت</b> من صفحة API Setup ينتهي خلال ساعات، ولا يُستخدم مع التاجر الحقيقي. استخدم دائماً توكن System User.
+    </div>
+    <div class="note">
+      <b>رقم الاختبار</b> من Meta يستقبل فقط من أرقام مضافة كمستلمين مختبَرين. الرقم الحقيقي للتاجر يستقبل من الجميع بعد اكتمال التحقق.
+    </div>
+    <div class="tip">
+      <b>عند الفشل:</b> إن لم تصل رسالة للبوت، تحقق من أن حدث <b>messages</b> مفعّل، وأن الاشتراك في الحساب نتيجته success: true، ثم افحص سجلات Vercel بحثاً عن POST /api/webhook.
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
