@@ -1395,8 +1395,8 @@ const isNew = await isNewCustomer(cfg, store.id, from);
     return sendText(cfg, phoneNumberId, from, MSG.customerUnknown);
   }
 
-  return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
-}
+if (isNew) return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
+return;}
 
 // زبائن الرقم الخاص: أول رسالة من أي رقم ترسل ترحيب المتجر تلقائياً
 async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
