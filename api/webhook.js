@@ -1550,8 +1550,7 @@ export default async function handler(req, res) {
         const value = change.value || {};
         const phoneNumberId = value.metadata?.phone_number_id;
         for (const msg of value.messages || []) {
-                    console.log('MSGDBG', msg.id, msg.type, msg.from, phoneNumberId);
-            if (alreadySeen(msg.id)) continue;
+          if (!(await claimMessage(cfg, msg.id))) continue;
           try {
             await handleMessage(cfg, phoneNumberId, msg);
           } catch (err) {
