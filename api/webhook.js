@@ -1468,7 +1468,7 @@ if (newcomer) {    await setSession(pcfg, from, { state: 'customer', active_stor
  const keywords = await listMenuKeywords(pcfg, store.id);
 if (!keywords.length) return sendText(pcfg, pid, from, MSG.customerUnknown);
     
-return sendText(pcfg, pid, from, 'اختر من الكلمات التالية:\n\n' + keywords.map((k, i) => (i + 1) + '. ' + k).join('\n'));
+return sendText(pcfg, pid, from, '✨ *أهلاً بك!* ✨\n\n🛍️ اختر ما تريد بكتابة الكلمة التالية:\n\n' + keywords.map((k) => '🔹 ' + k).join('\n') + '\n\n💬 اكتب الكلمة كما هي وسيصلك الرد فوراً');:\n\n' + keywords.map((k, i) => (i + 1) + '. ' + k).join('\n'));
   }
 }
 async function handleMessage(cfg, phoneNumberId, msg) {
