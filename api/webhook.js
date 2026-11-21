@@ -1428,8 +1428,7 @@ async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
   const newcomer = await isNewCustomer(pcfg, store.id, from);
   const inThisStore = session.active_store_id === store.id;
 
-  if (newcomer || !inThisStore) {
-    await setSession(pcfg, from, { state: 'customer', active_store_id: store.id, access_code_id: null });
+if (newcomer) {    await setSession(pcfg, from, { state: 'customer', active_store_id: store.id, access_code_id: null });
     await upsertCustomer(pcfg, store.id, from);
     return sendWelcome(pcfg, pid, from, store);
   }
