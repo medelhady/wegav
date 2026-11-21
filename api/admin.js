@@ -59,6 +59,20 @@ async function verifyWhatsAppNumber(phoneNumberId, token) {
   };
 }
 
+// اشتراك حساب واتساب التاجر في التطبيق حتى تصل الرسائل إلى الـ webhook
+async function subscribeWaba(wabaId, token) {
+  const r = await fetch(`${GRAPH}/${wabaId}/subscribed_apps`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.success) {
+    const msg = d?.error?.message || 'خطأ غير معروف';
+    return { ok: false, error: msg };
+  }
+  return { ok: true };
+}
+
 export default async function handler(req, res) {
   try {
     const url = (process.env.SUPABASE_URL || '').trim();
@@ -130,12 +144,17 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
 
-      // ربط رقم التاجر: نتحقق من الرقم والتوكن أولاً، ثم نحفظهما
+      // ربط رقم التاجر: نتحقق من الرقم والتوكن، ونشترك الحساب في التطبيق، ثم نحفظ
       if (action === 'wa_connect') {
         const phoneNumberId = String(body.phone_number_id || '').trim();
+        const wabaId = String(body.waba_id || '').trim();
         const token = String(body.token || '').trim();
+
         if (!/^\d{5,25}$/.test(phoneNumberId)) {
           return res.status(400).json({ error: 'معرّف الرقم (Phone Number ID) غير صالح' });
+        }
+        if (!/^\d{5,25}$/.test(wabaId)) {
+          return res.status(400).json({ error: 'معرّف حساب واتساب للأعمال (WABA ID) غير صالح' });
         }
         if (token.length < 20) {
           return res.status(400).json({ error: 'التوكن قصير جداً' });
@@ -144,6 +163,11 @@ export default async function handler(req, res) {
         const check = await verifyWhatsAppNumber(phoneNumberId, token);
         if (!check.ok) {
           return res.status(400).json({ error: 'فشل التحقق: ' + check.error });
+        }
+
+        const sub = await subscribeWaba(wabaId, token);
+        if (!sub.ok) {
+          return res.status(400).json({ error: 'فشل الاشتراك في الحساب: ' + sub.error });
         }
 
         const r = await fetch(`${url}/rest/v1/stores?id=eq.${id}`, {
