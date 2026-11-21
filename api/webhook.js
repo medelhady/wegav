@@ -1550,6 +1550,7 @@ export default async function handler(req, res) {
         const value = change.value || {};
         const phoneNumberId = value.metadata?.phone_number_id;
         for (const msg of value.messages || []) {
+            if (alreadySeen(msg.id)) continue;
           try {
             await handleMessage(cfg, phoneNumberId, msg);
           } catch (err) {
