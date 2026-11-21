@@ -1382,7 +1382,7 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
       await setSession(cfg, from, { state: 'idle', active_store_id: null, access_code_id: null });
       return sendText(cfg, phoneNumberId, from, MSG.codeInvalid);
     }
-
+const isNew = await isNewCustomer(cfg, store.id, from);
     await upsertCustomer(cfg, store.id, from);
 
     const access = store.private_enabled === false ? null : await getActiveAccess(cfg, session);
