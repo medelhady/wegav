@@ -1312,7 +1312,14 @@ async function handleRegistration(cfg, phoneNumberId, from, msg) {
     return sendText(cfg, phoneNumberId, from, MSG.registerAlready);
   }
 }
-
+async function listMenuKeywords(cfg, storeId) {
+  const r = await fetch(`${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&is_private=eq.false&select=keywords`, { headers: sbHeaders(cfg.key) });
+  if (!r.ok) return [];
+  const rows = await r.json();
+  const seen = new Set();
+  for (const row of rows) for (const k of row.keywords || []) if (k) seen.add(k);
+  return [...seen];
+}
 async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
   if (IGNORED_TYPES.includes(msg.type)) return;
 
