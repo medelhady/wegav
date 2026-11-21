@@ -1399,8 +1399,9 @@ const isNew = await isNewCustomer(cfg, store.id, from);
       const row = await findReplyForText(cfg, store.id, text, allowed);
       if (row) return sendReply(cfg, phoneNumberId, from, row);
     }
-    return sendText(cfg, phoneNumberId, from, MSG.customerUnknown);
-  }
+const keywords = await listMenuKeywords(cfg, store.id);
+if (!keywords.length) return sendText(cfg, phoneNumberId, from, MSG.customerUnknown);
+return sendText(cfg, phoneNumberId, from, 'اختر من الكلمات التالية:\n\n' + keywords.map((k, i) => (i + 1) + '. ' + k).join('\n'));  }
 
 if (isNew) return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
 return;}
