@@ -1,4 +1,13 @@
 const GRAPH = 'https://graph.facebook.com/v21.0';
+const SEEN_MSG = new Map();
+function alreadySeen(id) {
+  if (!id) return false;
+  const now = Date.now();
+  for (const [k, t] of SEEN_MSG) if (now - t > 600000) SEEN_MSG.delete(k);
+  if (SEEN_MSG.has(id)) return true;
+  SEEN_MSG.set(id, now);
+  return false;
+}
 const BUCKET = 'media';
 const MAX_BYTES = 16 * 1024 * 1024;
 const TEXT_MAX = 1000;
