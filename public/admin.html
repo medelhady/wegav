@@ -308,25 +308,30 @@ function buildModeBox(s) {
       const hint = document.createElement('div');
       hint.className = 'hint';
       hint.textContent = hasPrivateNumber(s)
-        ? 'لتغيير الرقم أدخل معرّفاً وتوكناً جديدين ثم اضغط ربط.'
-        : 'أدخل معرّف الرقم (Phone Number ID) والتوكن اللذين أرسلهما التاجر، ثم اضغط ربط وفحص.';
+        ? 'لتغيير الرقم أدخل القيم الثلاث الجديدة ثم اضغط ربط.'
+        : 'أدخل القيم الثلاث التي أرسلها التاجر (معرّف الرقم، ومعرّف حساب الواتساب، والتوكن)، ثم اضغط ربط وفحص.';
 
       const pid = document.createElement('input');
       pid.type = 'text';
-      pid.placeholder = 'Phone Number ID';
+      pid.placeholder = 'Phone Number ID (معرّف الرقم)';
       pid.style.marginBottom = '6px';
+
+      const waba = document.createElement('input');
+      waba.type = 'text';
+      waba.placeholder = 'WABA ID (معرّف حساب واتساب للأعمال)';
+      waba.style.marginBottom = '6px';
 
       const tok = document.createElement('input');
       tok.type = 'password';
-      tok.placeholder = 'التوكن (Access Token)';
+      tok.placeholder = 'التوكن الدائم (Access Token)';
       tok.style.marginBottom = '6px';
 
       const connectBtn = document.createElement('button');
       connectBtn.className = 'btn green';
       connectBtn.textContent = 'ربط وفحص';
-      connectBtn.addEventListener('click', () => connectNumber(s, pid, tok, connectBtn));
+      connectBtn.addEventListener('click', () => connectNumber(s, pid, waba, tok, connectBtn));
 
-      detail.append(hint, pid, tok, connectBtn);
+      detail.append(hint, pid, waba, tok, connectBtn);
     } else {
       const hint = document.createElement('div');
       hint.className = 'hint';
@@ -343,30 +348,32 @@ function buildModeBox(s) {
     }
   };
 
-  sel.addEventListener('change', () => {
-    if (sel.value === 'shared' && hasPrivateNumber(s)) {
-      renderDetail();
-      return;
-    }
-    renderDetail();
-  });
+  sel.addEventListener('change', renderDetail);
 
   renderDetail();
   box.append(title, sel, detail);
   return box;
 }
 
-async function connectNumber(s, pidInput, tokInput, btn) {
+async function connectNumber(s, pidInput, wabaInput, tokInput, btn) {
   const pid = pidInput.value.trim();
+  const wabaId = wabaInput.value.trim();
   const token = tokInput.value.trim();
   if (!pid) return show('✗ أدخل معرّف الرقم (Phone Number ID)', 'err');
+  if (!wabaId) return show('✗ أدخل معرّف حساب واتساب للأعمال (WABA ID)', 'err');
   if (!token) return show('✗ أدخل التوكن', 'err');
-  if (!confirm('ربط رقم ' + s.name + ' بهذا المعرّف؟ سيُفحص الاتصال أولاً.')) return;
+  if (!confirm('ربط رقم ' + s.name + '؟ سيُفحص الرقم ويُشترك الحساب في التطبيق.')) return;
 
   btn.disabled = true;
-  btn.textContent = '… جاري الفحص';
+  btn.textContent = '… جاري الفحص والاشتراك';
   try {
-    const data = await api('POST', { id: s.id, action: 'wa_connect', phone_number_id: pid, token });
+    const data = await api('POST', {
+      id: s.id,
+      action: 'wa_connect',
+      phone_number_id: pid,
+      waba_id: wabaId,
+      token,
+    });
     show('✓ تم ربط الرقم ' + (data.display || '') + ' لـ ' + s.name, 'ok');
     tokInput.value = '';
     await load();
