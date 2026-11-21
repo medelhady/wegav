@@ -1,13 +1,4 @@
 const GRAPH = 'https://graph.facebook.com/v21.0';
-const SEEN_MSG = new Map();
-function alreadySeen(id) {
-  if (!id) return false;
-  const now = Date.now();
-  for (const [k, t] of SEEN_MSG) if (now - t > 600000) SEEN_MSG.delete(k);
-  if (SEEN_MSG.has(id)) return true;
-  SEEN_MSG.set(id, now);
-  return false;
-}
 const BUCKET = 'media';
 const MAX_BYTES = 16 * 1024 * 1024;
 const TEXT_MAX = 1000;
@@ -300,6 +291,19 @@ async function loadBotMessages(cfg) {
 
 function sbHeaders(key) {
   return { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json' };
+}
+
+// يسجل معرّف الرسالة في قاعدة البيانات، ويرجع false إذا كانت معالجة من قبل
+async function claimMessage(cfg, id) {
+  if (!id) return true;
+  const r = await fetch(`${cfg.url}/rest/v1/processed_messages`, {
+    method: 'POST',
+    headers: { ...sbHeaders(cfg.key), Prefer: 'resolution=ignore-duplicates,return=representation' },
+    body: JSON.stringify({ id }),
+  });
+  if (!r.ok) return true;
+  const rows = await r.json();
+  return Array.isArray(rows) && rows.length > 0;
 }
 
 async function sbInsert(cfg, table, row) {
