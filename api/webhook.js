@@ -1489,9 +1489,10 @@ async function handleMessage(cfg, phoneNumberId, msg) {
     return handlePrivateCustomer(pcfg, phoneNumberId, from, privateStore, msg, session);
   }
 
-  if (session.state === 'await_store_name') {
-    return handleRegistration(cfg, phoneNumberId, from, msg);
-  }
+  const keywords = await listMenuKeywords(pcfg, store.id);
+  if (!keywords.length) return sendText(pcfg, pid, from, MSG.customerUnknown);
+  return sendText(pcfg, pid, from, '✨ *أهلاً بك!* ✨\n\n🛍️ اختر ما تريد بكتابة الكلمة التالية:\n\n' + keywords.map((k) => '🔹 ' + k).join('\n') + '\n\n💬 اكتب الكلمة كما هي وسيصلك الرد فوراً');
+}
   return handleCustomer(cfg, phoneNumberId, from, msg, session);
 }
 
