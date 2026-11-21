@@ -71,6 +71,11 @@ const MSG = {
     'للحصول على الردود أرسل *كود المتجر* المكون من 3 أرقام.\n' +
     'مثال: 924\n\n' +
     'وإذا كنت تريد تسجيل متجرك، اكتب *تسجيل*.',
+  customerMenu: (keywords) =>
+    '✨ *أهلاً بك!* ✨\n\n' +
+    '🛍️ اختر ما تريد بكتابة الكلمة التالية:\n\n' +
+    keywords.map((k) => '🔹 ' + k).join('\n') +
+    '\n\n💬 اكتب الكلمة كما هي وسيصلك الرد فوراً',
   customerStoreSet: (name) =>
     '✅ *مرحباً بك في ' + name + '* 🏪\n\n' +
     'اكتب كلمة للحصول على الرد، مثل:\n' +
@@ -563,6 +568,26 @@ async function listStoreReplies(cfg, storeId) {
   );
   const rows = await r.json();
   return Array.isArray(rows) ? rows : [];
+}
+
+async function listMenuKeywords(cfg, storeId) {
+  const r = await fetch(
+    `${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&is_private=eq.false&select=keywords`,
+    { headers: sbHeaders(cfg.key) }
+  );
+  if (!r.ok) return [];
+  const rows = await r.json();
+  const seen = new Set();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    for (const k of row.keywords || []) if (k) seen.add(k);
+  }
+  return [...seen];
+}
+
+async function sendKeywordMenu(cfg, phoneNumberId, to, storeId) {
+  const keywords = await listMenuKeywords(cfg, storeId);
+  if (keywords.length === 0) return sendText(cfg, phoneNumberId, to, MSG.customerUnknown);
+  return sendText(cfg, phoneNumberId, to, MSG.customerMenu(keywords));
 }
 
 async function deleteReplyById(cfg, id) {
@@ -1312,14 +1337,8 @@ async function handleRegistration(cfg, phoneNumberId, from, msg) {
     return sendText(cfg, phoneNumberId, from, MSG.registerAlready);
   }
 }
-async function listMenuKeywords(cfg, storeId) {
-  const r = await fetch(`${cfg.url}/rest/v1/auto_replies?store_id=eq.${storeId}&is_private=eq.false&select=keywords`, { headers: sbHeaders(cfg.key) });
-  if (!r.ok) return [];
-  const rows = await r.json();
-  const seen = new Set();
-  for (const row of rows) for (const k of row.keywords || []) if (k) seen.add(k);
-  return [...seen];
-}
+
+// زبائن الرقم المشترك (يكتبون كود المتجر)
 async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
   if (IGNORED_TYPES.includes(msg.type)) return;
 
@@ -1389,7 +1408,8 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
       await setSession(cfg, from, { state: 'idle', active_store_id: null, access_code_id: null });
       return sendText(cfg, phoneNumberId, from, MSG.codeInvalid);
     }
-const isNew = await isNewCustomer(cfg, store.id, from);
+
+    const isNew = await isNewCustomer(cfg, store.id, from);
     await upsertCustomer(cfg, store.id, from);
 
     const access = store.private_enabled === false ? null : await getActiveAccess(cfg, session);
@@ -1399,14 +1419,15 @@ const isNew = await isNewCustomer(cfg, store.id, from);
       const row = await findReplyForText(cfg, store.id, text, allowed);
       if (row) return sendReply(cfg, phoneNumberId, from, row);
     }
-const keywords = await listMenuKeywords(cfg, store.id);
-if (!keywords.length) return sendText(cfg, phoneNumberId, from, MSG.customerUnknown);
-return sendText(cfg, phoneNumberId, from, 'اختر من الكلمات التالية:\n\n' + keywords.map((k, i) => (i + 1) + '. ' + k).join('\n'));  }
 
-if (isNew) return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
-return;}
+    if (isNew) return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
+    return sendKeywordMenu(cfg, phoneNumberId, from, store.id);
+  }
 
-// زبائن الرقم الخاص: أول رسالة من أي رقم ترسل ترحيب المتجر تلقائياً
+  return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
+}
+
+// زبائن الرقم الخاص (رقم مستقل لكل متجر)
 async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
   if (IGNORED_TYPES.includes(msg.type)) return;
 
@@ -1424,11 +1445,10 @@ async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
     return sendText(pcfg, pid, from, on ? MSG.customerSubscribed : MSG.customerUnsubscribed);
   }
 
-  // زبون جديد لهذا المتجر، أو لم يُفعَّل بعد في هذه الجلسة: يُرسل الترحيب
+  // الترحيب يُرسل مرة واحدة فقط لكل زبون جديد
   const newcomer = await isNewCustomer(pcfg, store.id, from);
-  const inThisStore = session.active_store_id === store.id;
-
-if (newcomer) {    await setSession(pcfg, from, { state: 'customer', active_store_id: store.id, access_code_id: null });
+  if (newcomer) {
+    await setSession(pcfg, from, { state: 'customer', active_store_id: store.id, access_code_id: null });
     await upsertCustomer(pcfg, store.id, from);
     return sendWelcome(pcfg, pid, from, store);
   }
@@ -1465,13 +1485,11 @@ if (newcomer) {    await setSession(pcfg, from, { state: 'customer', active_stor
   if (type === 'text' && text) {
     const row = await findReplyForText(pcfg, store.id, text, allowed);
     if (row) return sendReply(pcfg, pid, from, row);
- const keywords = await listMenuKeywords(pcfg, store.id);
-if (!keywords.length) return sendText(pcfg, pid, from, MSG.customerUnknown);
-      }
-}
-return sendText(pcfg, pid, from, '✨ *أهلاً بك!* ✨\n\n🛍️ اختر ما تريد بكتابة الكلمة التالية:\n\n' + keywords.map((k) => '🔹 ' + k).join('\n') + '\n\n💬 اكتب الكلمة كما هي وسيصلك الرد فوراً');:\n\n' + keywords.map((k, i) => (i + 1) + '. ' + k).join('\n'));
   }
+
+  return sendKeywordMenu(pcfg, pid, from, store.id);
 }
+
 async function handleMessage(cfg, phoneNumberId, msg) {
   await loadBotMessages(cfg);
 
@@ -1489,10 +1507,9 @@ async function handleMessage(cfg, phoneNumberId, msg) {
     return handlePrivateCustomer(pcfg, phoneNumberId, from, privateStore, msg, session);
   }
 
-  const keywords = await listMenuKeywords(pcfg, store.id);
-  if (!keywords.length) return sendText(pcfg, pid, from, MSG.customerUnknown);
-  return sendText(pcfg, pid, from, '✨ *أهلاً بك!* ✨\n\n🛍️ اختر ما تريد بكتابة الكلمة التالية:\n\n' + keywords.map((k) => '🔹 ' + k).join('\n') + '\n\n💬 اكتب الكلمة كما هي وسيصلك الرد فوراً');
-}
+  if (session.state === 'await_store_name') {
+    return handleRegistration(cfg, phoneNumberId, from, msg);
+  }
   return handleCustomer(cfg, phoneNumberId, from, msg, session);
 }
 
