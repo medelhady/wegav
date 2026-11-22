@@ -165,104 +165,14 @@ function renderStats() {
 }
 
 // قائمة مختصرة: رقم التاجر ورقم البوت مع أزرار الإيقاف والتشغيل والفصل
-function renderNumbers() {
-  const box = $('numbers-list');
-  box.innerHTML = '';
-  if (stores.length === 0) {
-    box.innerHTML = '<div class="sub">لا يوجد تجار بعد</div>';
-    return;
-  }
-
-  stores.forEach(s => {
-    const row = document.createElement('div');
-    row.className = 'num-row';
-
-    const info = document.createElement('div');
-    info.className = 'num-info';
-
-    const title = document.createElement('div');
-    title.append(document.createElement('b'));
-    title.firstChild.textContent = s.name + '  (كود ' + s.merchant_code + ')';
-    const badge = document.createElement('span');
-    badge.className = 'badge b-' + s.status;
-    badge.textContent = ' ' + (STATUS_LABEL[s.status] || s.status);
-    title.append(' ', badge);
-
-    const merchantLine = document.createElement('div');
-    merchantLine.textContent = 'رقم التاجر: ';
-    const mNum = document.createElement('span');
-    mNum.className = 'ltr';
-    mNum.textContent = s.phone || '—';
-    merchantLine.appendChild(mNum);
-
-    const botLine = document.createElement('div');
-    botLine.textContent = 'رقم البوت: ';
-    const bNum = document.createElement('span');
-    bNum.className = 'ltr';
-    if (hasPrivateNumber(s)) {
-      bNum.textContent = (s.wa_display_phone || s.wa_phone_number_id) + (s.wa_verified_name ? ' | ' + s.wa_verified_name : '');
-    } else {
-      bNum.textContent = 'بوت مشترك (بدون رقم خاص)';
-    }
-    botLine.appendChild(bNum);
-
-    info.append(title, merchantLine, botLine);
-
-    const actions = document.createElement('div');
-    actions.className = 'num-actions';
-
-    const addBtn = (label, cls, fn) => {
-      const b = document.createElement('button');
-      b.className = 'btn ' + (cls || '');
-      b.textContent = label;
-      b.addEventListener('click', () => fn(b));
-      actions.appendChild(b);
-    };
-
-    if (s.status === 'active') {
-      addBtn('إيقاف البوت', 'gray', b => act(s.id, 'pause', {}, b));
-    } else {
-      addBtn('تشغيل البوت', 'green', b => act(s.id, 'activate', {}, b));
-    }
-
-    if (hasPrivateNumber(s)) {
-      addBtn('فصل الرقم', 'red', b => disconnectNumber(s, b));
-    }
-
-    row.append(info, actions);
-    box.appendChild(row);
-  });
-}
-
-function renderList() {
-  const box = $('list');
-  box.innerHTML = '';
-  if (stores.length === 0) {
-    box.innerHTML = '<div class="sub">لا يوجد تجار بعد</div>';
-    return;
-  }
-
-  stores.forEach(s => {
-    const row = document.createElement('div');
-    row.className = 'store';
-
-    const top = document.createElement('div');
-    top.className = 'row';
-
-    const info = document.createElement('div');
-    const name = document.createElement('div');
-    name.className = 'name';
-    name.textContent = s.name + '  (كود ' + s.merchant_code + ')';
-    const badge = document.createElement('span');
-    badge.className = 'badge b-' + s.status;
-    badge.textContent = STATUS_LABEL[s.status] || s.status;
-    name.append(' ', badge);
-    info.appendChild(name);
-
-    const quota = Number(s.notify_quota || 0);
-    const unit = Number(s.notify_unit_price || 0);
-    const used = Number(s.notify_used || 0);
-
+.nlist{display:flex;flex-direction:column;gap:8px}
+.nitem{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#f9fbff;border:1px solid #e3e9f3;border-right:4px solid #188038;border-radius:10px;padding:12px}
+.nitem.off{border-right-color:#d93025;background:#fff8f8}
+.nhead{font-weight:700;font-size:15px;margin-bottom:8px}
+.nchips{display:flex;gap:6px;flex-wrap:wrap}
+.nchip{background:#fff;border:1px solid #dde4ee;border-radius:8px;padding:4px 8px;font-size:12px;color:#555}
+.nchip b{color:#222;font-weight:700}
+.nact{display:flex;gap:4px;flex-wrap:wrap}
     const meta = document.createElement('div');
     meta.className = 'meta';
     meta.textContent =
