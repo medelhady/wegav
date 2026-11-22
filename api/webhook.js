@@ -1175,7 +1175,6 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       }
       return;
     }
-  console.log('TEXT_DBG', JSON.stringify(text), from);
     if (type === 'text' && text) {
       if (text.length > TEXT_MAX) {
         return sendText(cfg, phoneNumberId, from, MSG.textTooLong);
