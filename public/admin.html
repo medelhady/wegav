@@ -46,7 +46,9 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
 .nitem{background:#f9fbff;border:1px solid #e3e9f3;border-right:4px solid #188038;border-radius:10px;padding:12px}
 .nitem.off{border-right-color:#d93025;background:#fff8f8}
 .nsum{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
-.nleft{flex:1;min-width:220px}
+.nmain{display:flex;align-items:center;gap:10px;flex:1;min-width:220px}
+.nmain input[type=checkbox]{width:18px;height:18px;flex:0 0 auto;cursor:pointer}
+.nleft{flex:1;min-width:0}
 .nhead{font-weight:700;font-size:15px;margin-bottom:8px}
 .nchips{display:flex;gap:6px;flex-wrap:wrap}
 .nchip{background:#fff;border:1px solid #dde4ee;border-radius:8px;padding:4px 8px;font-size:12px;color:#555}
@@ -95,9 +97,14 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
     <div class="card">
       <div class="row">
         <h2>قائمة التجار</h2>
-        <span class="sub">اضغط "زيادة" لعرض كل المعلومات</span>
+        <div class="nact">
+          <button class="btn gray" id="btn-select-all">تحديد الكل</button>
+          <button class="btn gray" id="btn-clear-sel">إلغاء التحديد</button>
+          <button class="btn danger" id="btn-bulk-del" disabled>حذف المحدد (0)</button>
+        </div>
       </div>
-      <div id="numbers-list" class="nlist" style="margin-top:8px"></div>
+      <div class="sub" style="margin-top:6px">حدّد التجار بالمربع، ثم اضغط "حذف المحدد" للحذف الجماعي</div>
+      <div id="numbers-list" class="nlist" style="margin-top:10px"></div>
     </div>
 
     <div class="card">
@@ -119,6 +126,7 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
 let password = sessionStorage.getItem('admin_pass') || '';
 let stores = [];
 const openStores = new Set();
+const selected = new Set();
 const $ = id => document.getElementById(id);
 const STATUS_LABEL = { active: 'فعّال', paused: 'متوقف مؤقتاً', suspended: 'موقوف' };
 
@@ -159,6 +167,12 @@ function renderStats() {
   $('s-susp').textContent = stores.filter(s => s.status === 'suspended').length;
 }
 
+function updateBulkBtn() {
+  const b = $('btn-bulk-del');
+  b.textContent = 'حذف المحدد (' + selected.size + ')';
+  b.disabled = selected.size === 0;
+}
+
 function chip(label, value, ltr) {
   const c = document.createElement('span');
   c.className = 'nchip';
@@ -179,7 +193,6 @@ function mkBtn(label, cls, fn) {
   return b;
 }
 
-// القائمة المنسدلة: كل تاجر في صف، وزر "زيادة" يفتح كل معلوماته
 function renderNumbers() {
   const box = $('numbers-list');
   box.innerHTML = '';
@@ -194,6 +207,15 @@ function renderNumbers() {
 
     const sum = document.createElement('div');
     sum.className = 'nsum';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = selected.has(s.id);
+    cb.addEventListener('change', () => {
+      if (cb.checked) selected.add(s.id);
+      else selected.delete(s.id);
+      updateBulkBtn();
+    });
 
     const left = document.createElement('div');
     left.className = 'nleft';
@@ -217,6 +239,10 @@ function renderNumbers() {
     }
 
     left.append(head, chips);
+
+    const main = document.createElement('div');
+    main.className = 'nmain';
+    main.append(cb, left);
 
     const acts = document.createElement('div');
     acts.className = 'nact';
@@ -248,13 +274,12 @@ function renderNumbers() {
     });
     acts.appendChild(toggle);
 
-    sum.append(left, acts);
+    sum.append(main, acts);
     item.append(sum, det);
     box.appendChild(item);
   });
 }
 
-// كل معلومات التاجر: التفاصيل، نوع الاستقبال، الحصة، والإجراءات
 function buildDetails(s, container) {
   const quota = Number(s.notify_quota || 0);
   const unit = Number(s.notify_unit_price || 0);
@@ -344,7 +369,6 @@ function buildDetails(s, container) {
   container.appendChild(actions);
 }
 
-// صندوق نوع الاستقبال: بوت مشترك أو رقم خاص
 function buildModeBox(s) {
   const box = document.createElement('div');
   box.className = 'mode-box';
@@ -521,6 +545,62 @@ $('btn-codes').addEventListener('click', async () => {
   await renderCodes();
 });
 
+$('btn-select-all').addEventListener('click', () => {
+  stores.forEach(s => selected.add(s.id));
+  renderNumbers();
+  updateBulkBtn();
+});
+
+$('btn-clear-sel').addEventListener('click', () => {
+  selected.clear();
+  renderNumbers();
+  updateBulkBtn();
+});
+
+async function bulkDelete() {
+  const ids = [...selected];
+  if (ids.length === 0) return show('✗ حدّد تاجراً أو أكثر أولاً', 'err');
+
+  const names = ids
+    .map(id => (stores.find(s => s.id === id) || {}).name)
+    .filter(Boolean);
+
+  if (!confirm(
+    'سيتم حذف ' + ids.length + ' تاجر نهائياً مع كل بياناتهم (الردود، الملفات، الأكواد):\n\n' +
+    names.join('\n') + '\n\nهل تريد المتابعة؟'
+  )) return;
+
+  const typed = prompt('للتأكيد النهائي اكتب كلمة: حذف');
+  if (typed === null) return;
+  if (typed.trim() !== 'حذف') return show('✗ التأكيد غير مطابق، لم يُحذف شيء', 'err');
+
+  const btn = $('btn-bulk-del');
+  btn.disabled = true;
+  const failed = [];
+  let okCount = 0;
+
+  for (const id of ids) {
+    const s = stores.find(x => x.id === id);
+    if (!s) continue;
+    try {
+      await api('POST', { id: s.id, action: 'delete', confirm_name: s.name });
+      okCount++;
+      selected.delete(id);
+      openStores.delete(id);
+    } catch (e) {
+      failed.push(s.name + ': ' + e.message);
+    }
+  }
+
+  let text = '✓ تم حذف ' + okCount + ' تاجر';
+  if (failed.length) text += '\n✗ فشل حذف:\n' + failed.join('\n');
+  show(text, failed.length ? 'err' : 'ok');
+
+  await load();
+}
+
+$('btn-bulk-del').addEventListener('click', bulkDelete);
+
 async function saveNotify(s, qInput, uInput, btn) {
   const q = Number(qInput.value);
   const u = Number(uInput.value);
@@ -580,6 +660,7 @@ function toggleDelete(container, s) {
     try {
       await api('POST', { id: s.id, action: 'delete', confirm_name: input.value.trim() });
       openStores.delete(s.id);
+      selected.delete(s.id);
       show('🗑 تم حذف حساب ' + s.name + ' نهائياً', 'ok');
       await load();
     } catch (e) {
@@ -615,8 +696,13 @@ async function load() {
   try {
     const data = await api('GET');
     stores = Array.isArray(data.items) ? data.items : [];
+    const existing = new Set(stores.map(s => s.id));
+    for (const id of [...selected]) {
+      if (!existing.has(id)) selected.delete(id);
+    }
     renderStats();
     renderNumbers();
+    updateBulkBtn();
   } catch (e) {
     if (e.status === 401) {
       sessionStorage.removeItem('admin_pass');
