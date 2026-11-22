@@ -9,6 +9,7 @@ body{font-family:system-ui,sans-serif;background:#f4f6fa;margin:0;color:#222}
 .wrap{max-width:720px;margin:0 auto;padding:16px}
 .card{background:#fff;border-radius:12px;padding:16px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:12px}
 h1{font-size:18px;margin:0 0 4px}
+h2{font-size:16px;margin:0 0 10px}
 .sub{font-size:13px;color:#666}
 input[type=password],input[type=text],input[type=number],select{width:100%;padding:10px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box;font-size:15px;background:#fff}
 .btn{background:#1a73e8;color:#fff;border:0;border-radius:8px;padding:8px 12px;cursor:pointer;font-size:13px;font-weight:600;margin:2px;text-decoration:none;display:inline-block}
@@ -43,6 +44,12 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
 .mode-box{background:#f7f9fc;border:1px solid #dde4ee;border-radius:8px;padding:10px;margin-top:8px}
 .mode-box .hint{font-size:12px;color:#555;margin:6px 0}
 .mode-box .ok-line{font-size:13px;color:#188038;font-weight:700;margin-bottom:6px}
+.num-row{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px dashed #eee;padding:10px 0;flex-wrap:wrap}
+.num-row:last-child{border-bottom:0}
+.num-info{font-size:13px;line-height:1.8}
+.num-info b{font-size:14px}
+.num-actions{display:flex;gap:4px;flex-wrap:wrap}
+.ltr{direction:ltr;unicode-bidi:embed;display:inline-block}
 #msg{font-size:13px;margin-top:8px;min-height:18px;white-space:pre-line}
 .ok{color:#188038}.err{color:#d93025}
 .hidden{display:none}
@@ -84,7 +91,15 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
 
     <div class="card">
       <div class="row">
-        <h1 style="font-size:16px">الأكواد النشطة</h1>
+        <h2>قائمة الأرقام والبوتات</h2>
+        <span class="sub">رقم التاجر ↔ رقم البوت</span>
+      </div>
+      <div id="numbers-list" style="margin-top:8px"></div>
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <h2>الأكواد النشطة</h2>
         <button class="btn gray" id="btn-codes">عرض الأكواد</button>
       </div>
       <div id="codes-box" class="hidden" style="margin-top:8px"></div>
@@ -139,6 +154,76 @@ function renderStats() {
   $('s-active').textContent = stores.filter(s => s.status === 'active').length;
   $('s-private-num').textContent = stores.filter(hasPrivateNumber).length;
   $('s-susp').textContent = stores.filter(s => s.status === 'suspended').length;
+}
+
+// قائمة مختصرة: رقم التاجر ورقم البوت مع أزرار الإيقاف والتشغيل والفصل
+function renderNumbers() {
+  const box = $('numbers-list');
+  box.innerHTML = '';
+  if (stores.length === 0) {
+    box.innerHTML = '<div class="sub">لا يوجد تجار بعد</div>';
+    return;
+  }
+
+  stores.forEach(s => {
+    const row = document.createElement('div');
+    row.className = 'num-row';
+
+    const info = document.createElement('div');
+    info.className = 'num-info';
+
+    const title = document.createElement('div');
+    title.append(document.createElement('b'));
+    title.firstChild.textContent = s.name + '  (كود ' + s.merchant_code + ')';
+    const badge = document.createElement('span');
+    badge.className = 'badge b-' + s.status;
+    badge.textContent = ' ' + (STATUS_LABEL[s.status] || s.status);
+    title.append(' ', badge);
+
+    const merchantLine = document.createElement('div');
+    merchantLine.textContent = 'رقم التاجر: ';
+    const mNum = document.createElement('span');
+    mNum.className = 'ltr';
+    mNum.textContent = s.phone || '—';
+    merchantLine.appendChild(mNum);
+
+    const botLine = document.createElement('div');
+    botLine.textContent = 'رقم البوت: ';
+    const bNum = document.createElement('span');
+    bNum.className = 'ltr';
+    if (hasPrivateNumber(s)) {
+      bNum.textContent = (s.wa_display_phone || s.wa_phone_number_id) + (s.wa_verified_name ? ' | ' + s.wa_verified_name : '');
+    } else {
+      bNum.textContent = 'بوت مشترك (بدون رقم خاص)';
+    }
+    botLine.appendChild(bNum);
+
+    info.append(title, merchantLine, botLine);
+
+    const actions = document.createElement('div');
+    actions.className = 'num-actions';
+
+    const addBtn = (label, cls, fn) => {
+      const b = document.createElement('button');
+      b.className = 'btn ' + (cls || '');
+      b.textContent = label;
+      b.addEventListener('click', () => fn(b));
+      actions.appendChild(b);
+    };
+
+    if (s.status === 'active') {
+      addBtn('إيقاف البوت', 'gray', b => act(s.id, 'pause', {}, b));
+    } else {
+      addBtn('تشغيل البوت', 'green', b => act(s.id, 'activate', {}, b));
+    }
+
+    if (hasPrivateNumber(s)) {
+      addBtn('فصل الرقم', 'red', b => disconnectNumber(s, b));
+    }
+
+    row.append(info, actions);
+    box.appendChild(row);
+  });
 }
 
 function renderList() {
@@ -386,11 +471,11 @@ async function connectNumber(s, pidInput, wabaInput, tokInput, btn) {
 }
 
 async function disconnectNumber(s, btn) {
-  if (!confirm('تحويل ' + s.name + ' إلى البوت المشترك؟ سيُفصل الرقم الخاص، وتبقى الردود والزبائن كما هي.')) return;
+  if (!confirm('فصل الرقم الخاص لـ ' + s.name + '؟ سيتوقف البوت على هذا الرقم، وتبقى الردود والزبائن كما هي.')) return;
   btn.disabled = true;
   try {
     await api('POST', { id: s.id, action: 'wa_disconnect' });
-    show('✓ تم تحويل ' + s.name + ' إلى البوت المشترك', 'ok');
+    show('✓ تم فصل الرقم عن ' + s.name, 'ok');
     await load();
   } catch (e) {
     show('✗ فشل: ' + e.message, 'err');
@@ -558,6 +643,7 @@ async function load() {
     const data = await api('GET');
     stores = Array.isArray(data.items) ? data.items : [];
     renderStats();
+    renderNumbers();
     renderList();
   } catch (e) {
     if (e.status === 401) {
