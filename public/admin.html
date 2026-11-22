@@ -18,11 +18,7 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
 .btn.green{background:#188038}
 .btn.danger{background:#d93025}
 .btn:disabled{opacity:.5;cursor:wait}
-.store{border-bottom:1px dashed #eee;padding:12px 0}
-.store:last-child{border-bottom:0}
 .row{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
-.name{font-weight:700;font-size:15px}
-.meta{font-size:13px;color:#555;margin-top:4px;line-height:1.7;white-space:pre-line}
 .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:12px;font-weight:700}
 .b-active{background:#e6f4ea;color:#188038}
 .b-paused{background:#fef7e0;color:#b06000}
@@ -31,6 +27,7 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
 .stat{flex:1;min-width:120px;background:#fff;border-radius:10px;padding:12px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
 .stat .k{font-size:12px;color:#777}
 .stat .v{font-size:20px;font-weight:700;margin-top:4px}
+.meta{font-size:13px;color:#555;margin-top:4px;line-height:1.7;white-space:pre-line}
 .danger-box{background:#fff5f5;border:1px solid #f1b3ad;border-radius:8px;padding:10px;margin-top:8px}
 .danger-box .hint{font-size:12px;color:#a50e0e;margin-bottom:6px}
 .box{background:#f7f9fc;border:1px solid #dde4ee;border-radius:8px;padding:10px;margin-top:8px}
@@ -46,13 +43,16 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
 .mode-box .ok-line{font-size:13px;color:#188038;font-weight:700;margin-bottom:6px}
 .ltr{direction:ltr;unicode-bidi:embed;display:inline-block}
 .nlist{display:flex;flex-direction:column;gap:8px}
-.nitem{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#f9fbff;border:1px solid #e3e9f3;border-right:4px solid #188038;border-radius:10px;padding:12px}
+.nitem{background:#f9fbff;border:1px solid #e3e9f3;border-right:4px solid #188038;border-radius:10px;padding:12px}
 .nitem.off{border-right-color:#d93025;background:#fff8f8}
+.nsum{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.nleft{flex:1;min-width:220px}
 .nhead{font-weight:700;font-size:15px;margin-bottom:8px}
 .nchips{display:flex;gap:6px;flex-wrap:wrap}
 .nchip{background:#fff;border:1px solid #dde4ee;border-radius:8px;padding:4px 8px;font-size:12px;color:#555}
 .nchip b{color:#222;font-weight:700}
 .nact{display:flex;gap:4px;flex-wrap:wrap}
+.ndet{margin-top:10px;border-top:1px dashed #dde4ee;padding-top:10px}
 #msg{font-size:13px;margin-top:8px;min-height:18px;white-space:pre-line}
 .ok{color:#188038}.err{color:#d93025}
 .hidden{display:none}
@@ -94,8 +94,8 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
 
     <div class="card">
       <div class="row">
-        <h2>قائمة الأرقام والبوتات</h2>
-        <span class="sub">رقم التاجر ↔ رقم البوت</span>
+        <h2>قائمة التجار</h2>
+        <span class="sub">اضغط "زيادة" لعرض كل المعلومات</span>
       </div>
       <div id="numbers-list" class="nlist" style="margin-top:8px"></div>
     </div>
@@ -109,8 +109,6 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
     </div>
 
     <div class="card">
-      <h2>تفاصيل التجار</h2>
-      <div id="list"></div>
       <div id="msg"></div>
     </div>
   </div>
@@ -120,6 +118,7 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
 <script>
 let password = sessionStorage.getItem('admin_pass') || '';
 let stores = [];
+const openStores = new Set();
 const $ = id => document.getElementById(id);
 const STATUS_LABEL = { active: 'فعّال', paused: 'متوقف مؤقتاً', suspended: 'موقوف' };
 
@@ -172,6 +171,15 @@ function chip(label, value, ltr) {
   return c;
 }
 
+function mkBtn(label, cls, fn) {
+  const b = document.createElement('button');
+  b.className = 'btn ' + (cls || '');
+  b.textContent = label;
+  b.addEventListener('click', () => fn(b));
+  return b;
+}
+
+// القائمة المنسدلة: كل تاجر في صف، وزر "زيادة" يفتح كل معلوماته
 function renderNumbers() {
   const box = $('numbers-list');
   box.innerHTML = '';
@@ -184,184 +192,159 @@ function renderNumbers() {
     const item = document.createElement('div');
     item.className = 'nitem' + (s.status === 'active' ? '' : ' off');
 
+    const sum = document.createElement('div');
+    sum.className = 'nsum';
+
     const left = document.createElement('div');
+    left.className = 'nleft';
 
     const head = document.createElement('div');
     head.className = 'nhead';
-    head.textContent = s.name + ' (كود ' + s.merchant_code + ')  ';
+    head.textContent = s.name;
     const badge = document.createElement('span');
     badge.className = 'badge b-' + s.status;
     badge.textContent = STATUS_LABEL[s.status] || s.status;
-    head.appendChild(badge);
+    head.append(' ', badge);
 
     const chips = document.createElement('div');
     chips.className = 'nchips';
-    chips.append(chip('التاجر', s.phone || '—', true));
+    chips.append(chip('الكود', s.merchant_code, true));
+    chips.append(chip('رقم التاجر', s.phone || '—', true));
     if (hasPrivateNumber(s)) {
-      chips.append(chip('البوت', s.wa_display_phone || s.wa_phone_number_id, true));
+      chips.append(chip('رقم البوت', s.wa_display_phone || s.wa_phone_number_id, true));
     } else {
-      chips.append(chip('البوت', 'مشترك', false));
+      chips.append(chip('رقم البوت', 'مشترك', false));
     }
 
     left.append(head, chips);
 
-    const actions = document.createElement('div');
-    actions.className = 'nact';
-
-    const addBtn = (label, cls, fn) => {
-      const b = document.createElement('button');
-      b.className = 'btn ' + (cls || '');
-      b.textContent = label;
-      b.addEventListener('click', () => fn(b));
-      actions.appendChild(b);
-    };
-
+    const acts = document.createElement('div');
+    acts.className = 'nact';
     if (s.status === 'active') {
-      addBtn('إيقاف البوت', 'gray', b => act(s.id, 'pause', {}, b));
+      acts.appendChild(mkBtn('إيقاف البوت', 'gray', b => act(s.id, 'pause', {}, b)));
     } else {
-      addBtn('تشغيل البوت', 'green', b => act(s.id, 'activate', {}, b));
+      acts.appendChild(mkBtn('تشغيل البوت', 'green', b => act(s.id, 'activate', {}, b)));
     }
     if (hasPrivateNumber(s)) {
-      addBtn('فصل الرقم', 'red', b => disconnectNumber(s, b));
+      acts.appendChild(mkBtn('فصل الرقم', 'red', b => disconnectNumber(s, b)));
     }
 
-    item.append(left, actions);
+    const det = document.createElement('div');
+    det.className = 'ndet';
+    const isOpen = openStores.has(s.id);
+    if (!isOpen) det.classList.add('hidden');
+    buildDetails(s, det);
+
+    const toggle = mkBtn(isOpen ? 'إخفاء ▲' : 'زيادة ▼', 'gray', b => {
+      if (det.classList.contains('hidden')) {
+        det.classList.remove('hidden');
+        openStores.add(s.id);
+        b.textContent = 'إخفاء ▲';
+      } else {
+        det.classList.add('hidden');
+        openStores.delete(s.id);
+        b.textContent = 'زيادة ▼';
+      }
+    });
+    acts.appendChild(toggle);
+
+    sum.append(left, acts);
+    item.append(sum, det);
     box.appendChild(item);
   });
 }
 
-function renderList() {
-  const box = $('list');
-  box.innerHTML = '';
-  if (stores.length === 0) {
-    box.innerHTML = '<div class="sub">لا يوجد تجار بعد</div>';
-    return;
+// كل معلومات التاجر: التفاصيل، نوع الاستقبال، الحصة، والإجراءات
+function buildDetails(s, container) {
+  const quota = Number(s.notify_quota || 0);
+  const unit = Number(s.notify_unit_price || 0);
+  const used = Number(s.notify_used || 0);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent =
+    'الهاتف: ' + (s.phone || '—') + '\n' +
+    'نوع الاستقبال: ' + (hasPrivateNumber(s) ? 'رقم خاص' : 'بوت مشترك') + '\n' +
+    'الخطة: ' + (s.plan === 'paid' ? 'مدفوعة' : 'تجريبية') + ' | ' +
+    'الردود: ' + s.replies_used + ' من ' + s.replies_quota + ' | ' +
+    'الانتهاء: ' + fmtDate(s.plan_expires_at) + '\n' +
+    'المحتوى الخاص: ' + (s.private_enabled ? 'مفعّل ✅' : 'موقوف ⛔') + '\n' +
+    'الأكواد العامة: ' + (s.public_codes_enabled ? 'مفعّلة ✅' : 'موقوفة ⛔') + '\n' +
+    'الإشعارات: ' + used + ' من ' + quota + ' إشعار شهرياً (' + (quota * unit) + ' أوقية)';
+  container.appendChild(meta);
+
+  container.appendChild(buildModeBox(s));
+
+  const box2 = document.createElement('div');
+  box2.className = 'box';
+
+  const hint = document.createElement('div');
+  hint.className = 'hint';
+  hint.textContent = 'حصة الإشعارات الشهرية: عدد الإشعارات × سعر الإشعار الواحد بالأوقية';
+
+  const r2 = document.createElement('div');
+  r2.className = 'box-row';
+
+  const qInput = document.createElement('input');
+  qInput.type = 'number';
+  qInput.min = '0';
+  qInput.step = '1';
+  qInput.value = String(quota);
+  qInput.placeholder = 'عدد الإشعارات';
+
+  const uInput = document.createElement('input');
+  uInput.type = 'number';
+  uInput.min = '0';
+  uInput.step = '1';
+  uInput.value = String(unit);
+  uInput.placeholder = 'سعر الإشعار';
+
+  const totalEl = document.createElement('span');
+  totalEl.className = 'total';
+  const refreshTotal = () => {
+    const q = Math.floor(Number(qInput.value) || 0);
+    const u = Math.floor(Number(uInput.value) || 0);
+    totalEl.textContent = 'الإجمالي: ' + (q * u) + ' أوقية';
+  };
+  qInput.addEventListener('input', refreshTotal);
+  uInput.addEventListener('input', refreshTotal);
+  refreshTotal();
+
+  const saveBtn = mkBtn('حفظ الحصة', 'green', b => saveNotify(s, qInput, uInput, b));
+  const resetBtn = mkBtn('تصفير عداد الإشعارات', 'gray', b => resetNotify(s, b));
+
+  r2.append(qInput, uInput, totalEl, saveBtn, resetBtn);
+  box2.append(hint, r2);
+  container.appendChild(box2);
+
+  const actions = document.createElement('div');
+  actions.className = 'nact';
+  actions.style.marginTop = '8px';
+
+  actions.appendChild(mkBtn('تفعيل', 'green', b => act(s.id, 'activate', {}, b)));
+  actions.appendChild(mkBtn('إيقاف مؤقت', 'gray', b => act(s.id, 'pause', {}, b)));
+  actions.appendChild(mkBtn('إيقاف كامل', 'red', b => act(s.id, 'suspend', {}, b)));
+  actions.appendChild(mkBtn('اشتراك شهري (500 رد)', '', b => act(s.id, 'paid', { quota: 500, months: 1 }, b)));
+  actions.appendChild(mkBtn('تصفير الردود', 'gray', b => act(s.id, 'reset', {}, b)));
+
+  if (s.private_enabled) {
+    actions.appendChild(mkBtn('إيقاف الخاص', 'gray', b => act(s.id, 'private_off', {}, b)));
+  } else {
+    actions.appendChild(mkBtn('تفعيل الخاص', 'green', b => act(s.id, 'private_on', {}, b)));
   }
 
-  stores.forEach(s => {
-    const row = document.createElement('div');
-    row.className = 'store';
+  if (s.public_codes_enabled) {
+    actions.appendChild(mkBtn('إيقاف الأكواد العامة', 'gray', b => act(s.id, 'public_off', {}, b)));
+  } else {
+    actions.appendChild(mkBtn('تفعيل الأكواد العامة', 'green', b => act(s.id, 'public_on', {}, b)));
+  }
 
-    const top = document.createElement('div');
-    top.className = 'row';
+  actions.appendChild(mkBtn('حذف الحساب بالكامل', 'danger', () => toggleDelete(container, s)));
 
-    const info = document.createElement('div');
-    const name = document.createElement('div');
-    name.className = 'name';
-    name.textContent = s.name + '  (كود ' + s.merchant_code + ')';
-    const badge = document.createElement('span');
-    badge.className = 'badge b-' + s.status;
-    badge.textContent = STATUS_LABEL[s.status] || s.status;
-    name.append(' ', badge);
-    info.appendChild(name);
-
-    const quota = Number(s.notify_quota || 0);
-    const unit = Number(s.notify_unit_price || 0);
-    const used = Number(s.notify_used || 0);
-
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.textContent =
-      'الهاتف: ' + (s.phone || '—') + '\n' +
-      'نوع الاستقبال: ' + (hasPrivateNumber(s) ? 'رقم خاص' : 'بوت مشترك') + '\n' +
-      'الخطة: ' + (s.plan === 'paid' ? 'مدفوعة' : 'تجريبية') + ' | ' +
-      'الردود: ' + s.replies_used + ' من ' + s.replies_quota + ' | ' +
-      'الانتهاء: ' + fmtDate(s.plan_expires_at) + '\n' +
-      'المحتوى الخاص: ' + (s.private_enabled ? 'مفعّل ✅' : 'موقوف ⛔') + '\n' +
-      'الأكواد العامة: ' + (s.public_codes_enabled ? 'مفعّلة ✅' : 'موقوفة ⛔') + '\n' +
-      'الإشعارات: ' + used + ' من ' + quota + ' إشعار شهرياً (' + (quota * unit) + ' أوقية)';
-    info.appendChild(meta);
-
-    top.appendChild(info);
-    row.appendChild(top);
-
-    row.appendChild(buildModeBox(s));
-
-    const box2 = document.createElement('div');
-    box2.className = 'box';
-
-    const hint = document.createElement('div');
-    hint.className = 'hint';
-    hint.textContent = 'حصة الإشعارات الشهرية: عدد الإشعارات × سعر الإشعار الواحد بالأوقية';
-
-    const r2 = document.createElement('div');
-    r2.className = 'box-row';
-
-    const qInput = document.createElement('input');
-    qInput.type = 'number';
-    qInput.min = '0';
-    qInput.step = '1';
-    qInput.value = String(quota);
-    qInput.placeholder = 'عدد الإشعارات';
-
-    const uInput = document.createElement('input');
-    uInput.type = 'number';
-    uInput.min = '0';
-    uInput.step = '1';
-    uInput.value = String(unit);
-    uInput.placeholder = 'سعر الإشعار';
-
-    const totalEl = document.createElement('span');
-    totalEl.className = 'total';
-    const refreshTotal = () => {
-      const q = Math.floor(Number(qInput.value) || 0);
-      const u = Math.floor(Number(uInput.value) || 0);
-      totalEl.textContent = 'الإجمالي: ' + (q * u) + ' أوقية';
-    };
-    qInput.addEventListener('input', refreshTotal);
-    uInput.addEventListener('input', refreshTotal);
-    refreshTotal();
-
-    const saveBtn = document.createElement('button');
-    saveBtn.className = 'btn green';
-    saveBtn.textContent = 'حفظ الحصة';
-    saveBtn.addEventListener('click', () => saveNotify(s, qInput, uInput, saveBtn));
-
-    const resetBtn = document.createElement('button');
-    resetBtn.className = 'btn gray';
-    resetBtn.textContent = 'تصفير عداد الإشعارات';
-    resetBtn.addEventListener('click', () => resetNotify(s, resetBtn));
-
-    r2.append(qInput, uInput, totalEl, saveBtn, resetBtn);
-    box2.append(hint, r2);
-    row.appendChild(box2);
-
-    const actions = document.createElement('div');
-    actions.style.marginTop = '8px';
-
-    const addBtn = (label, cls, fn) => {
-      const b = document.createElement('button');
-      b.className = 'btn ' + (cls || '');
-      b.textContent = label;
-      b.addEventListener('click', () => fn(b));
-      actions.appendChild(b);
-    };
-
-    addBtn('تفعيل', 'green', b => act(s.id, 'activate', {}, b));
-    addBtn('إيقاف مؤقت', 'gray', b => act(s.id, 'pause', {}, b));
-    addBtn('إيقاف كامل', 'red', b => act(s.id, 'suspend', {}, b));
-    addBtn('اشتراك شهري (500 رد)', '', b => act(s.id, 'paid', { quota: 500, months: 1 }, b));
-    addBtn('تصفير الردود', 'gray', b => act(s.id, 'reset', {}, b));
-
-    if (s.private_enabled) {
-      addBtn('إيقاف الخاص', 'gray', b => act(s.id, 'private_off', {}, b));
-    } else {
-      addBtn('تفعيل الخاص', 'green', b => act(s.id, 'private_on', {}, b));
-    }
-
-    if (s.public_codes_enabled) {
-      addBtn('إيقاف الأكواد العامة', 'gray', b => act(s.id, 'public_off', {}, b));
-    } else {
-      addBtn('تفعيل الأكواد العامة', 'green', b => act(s.id, 'public_on', {}, b));
-    }
-
-    addBtn('حذف الحساب', 'danger', () => toggleDelete(row, s));
-
-    row.appendChild(actions);
-    box.appendChild(row);
-  });
+  container.appendChild(actions);
 }
 
+// صندوق نوع الاستقبال: بوت مشترك أو رقم خاص
 function buildModeBox(s) {
   const box = document.createElement('div');
   box.className = 'mode-box';
@@ -413,10 +396,7 @@ function buildModeBox(s) {
       tok.placeholder = 'التوكن الدائم (Access Token)';
       tok.style.marginBottom = '6px';
 
-      const connectBtn = document.createElement('button');
-      connectBtn.className = 'btn green';
-      connectBtn.textContent = 'ربط وفحص';
-      connectBtn.addEventListener('click', () => connectNumber(s, pid, waba, tok, connectBtn));
+      const connectBtn = mkBtn('ربط وفحص', 'green', b => connectNumber(s, pid, waba, tok, b));
 
       detail.append(hint, pid, waba, tok, connectBtn);
     } else {
@@ -426,11 +406,7 @@ function buildModeBox(s) {
       detail.appendChild(hint);
 
       if (hasPrivateNumber(s)) {
-        const disconnectBtn = document.createElement('button');
-        disconnectBtn.className = 'btn red';
-        disconnectBtn.textContent = 'تحويل إلى بوت مشترك (فصل الرقم الخاص)';
-        disconnectBtn.addEventListener('click', () => disconnectNumber(s, disconnectBtn));
-        detail.appendChild(disconnectBtn);
+        detail.appendChild(mkBtn('تحويل إلى بوت مشترك (فصل الرقم الخاص)', 'red', b => disconnectNumber(s, b)));
       }
     }
   };
@@ -514,19 +490,16 @@ async function renderCodes() {
         ' | ينتهي: ' + fmtDate(c.expires_at) + bound;
       info.append(code, det);
 
-      const rv = document.createElement('button');
-      rv.className = 'btn red';
-      rv.textContent = 'إلغاء الكود';
-      rv.addEventListener('click', async () => {
+      const rv = mkBtn('إلغاء الكود', 'red', async b => {
         if (!confirm('إلغاء الكود ' + c.code + ' نهائياً؟')) return;
-        rv.disabled = true;
+        b.disabled = true;
         try {
           await api('POST', { action: 'revoke_code', code_id: c.id });
           show('✓ تم إلغاء الكود ' + c.code, 'ok');
           await renderCodes();
         } catch (e) {
           show('✗ فشل الإلغاء: ' + e.message, 'err');
-          rv.disabled = false;
+          b.disabled = false;
         }
       });
 
@@ -582,8 +555,8 @@ async function resetNotify(s, btn) {
   }
 }
 
-function toggleDelete(row, s) {
-  const existing = row.querySelector('.danger-box');
+function toggleDelete(container, s) {
+  const existing = container.querySelector('.danger-box');
   if (existing) { existing.remove(); return; }
 
   const box = document.createElement('div');
@@ -592,34 +565,32 @@ function toggleDelete(row, s) {
   const hint = document.createElement('div');
   hint.className = 'hint';
   hint.textContent =
-    'تحذير: سيُحذف كل شيء نهائياً (الردود، الملفات، النصوص، الجلسة). ' +
+    'تحذير: سيُحذف كل شيء نهائياً (الردود، الملفات، النصوص، الجلسة، الأكواد). ' +
     'للتأكيد اكتب اسم المتجر بالضبط: ' + s.name;
 
   const input = document.createElement('input');
   input.type = 'text';
   input.placeholder = 'اكتب اسم المتجر';
 
-  const confirmBtn = document.createElement('button');
-  confirmBtn.className = 'btn danger';
-  confirmBtn.textContent = 'حذف نهائياً';
-  confirmBtn.style.marginTop = '8px';
-  confirmBtn.addEventListener('click', async () => {
+  const confirmBtn = mkBtn('حذف نهائياً', 'danger', async b => {
     if (input.value.trim() !== s.name) {
       return show('✗ الاسم غير مطابق، لم يُحذف شيء', 'err');
     }
-    confirmBtn.disabled = true;
+    b.disabled = true;
     try {
       await api('POST', { id: s.id, action: 'delete', confirm_name: input.value.trim() });
+      openStores.delete(s.id);
       show('🗑 تم حذف حساب ' + s.name + ' نهائياً', 'ok');
       await load();
     } catch (e) {
       show('✗ فشل الحذف: ' + e.message, 'err');
-      confirmBtn.disabled = false;
+      b.disabled = false;
     }
   });
+  confirmBtn.style.marginTop = '8px';
 
   box.append(hint, input, confirmBtn);
-  row.appendChild(box);
+  container.appendChild(box);
   input.focus();
 }
 
@@ -646,7 +617,6 @@ async function load() {
     stores = Array.isArray(data.items) ? data.items : [];
     renderStats();
     renderNumbers();
-    renderList();
   } catch (e) {
     if (e.status === 401) {
       sessionStorage.removeItem('admin_pass');
