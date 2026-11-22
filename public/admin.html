@@ -44,16 +44,8 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
 .mode-box{background:#f7f9fc;border:1px solid #dde4ee;border-radius:8px;padding:10px;margin-top:8px}
 .mode-box .hint{font-size:12px;color:#555;margin:6px 0}
 .mode-box .ok-line{font-size:13px;color:#188038;font-weight:700;margin-bottom:6px}
-.num-row{display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px dashed #eee;padding:10px 0;flex-wrap:wrap}
-.num-row:last-child{border-bottom:0}
-.num-info{font-size:13px;line-height:1.8}
-.num-info b{font-size:14px}
-.num-actions{display:flex;gap:4px;flex-wrap:wrap}
 .ltr{direction:ltr;unicode-bidi:embed;display:inline-block}
-#msg{font-size:13px;margin-top:8px;min-height:18px;white-space:pre-line}
-.ok{color:#188038}.err{color:#d93025}
-.hidden{display:none}
-  .nlist{display:flex;flex-direction:column;gap:8px}
+.nlist{display:flex;flex-direction:column;gap:8px}
 .nitem{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#f9fbff;border:1px solid #e3e9f3;border-right:4px solid #188038;border-radius:10px;padding:12px}
 .nitem.off{border-right-color:#d93025;background:#fff8f8}
 .nhead{font-weight:700;font-size:15px;margin-bottom:8px}
@@ -61,6 +53,9 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
 .nchip{background:#fff;border:1px solid #dde4ee;border-radius:8px;padding:4px 8px;font-size:12px;color:#555}
 .nchip b{color:#222;font-weight:700}
 .nact{display:flex;gap:4px;flex-wrap:wrap}
+#msg{font-size:13px;margin-top:8px;min-height:18px;white-space:pre-line}
+.ok{color:#188038}.err{color:#d93025}
+.hidden{display:none}
 </style>
 </head>
 <body>
@@ -102,7 +97,7 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
         <h2>قائمة الأرقام والبوتات</h2>
         <span class="sub">رقم التاجر ↔ رقم البوت</span>
       </div>
-      <div id="numbers-list" style="margin-top:8px"></div>
+      <div id="numbers-list" class="nlist" style="margin-top:8px"></div>
     </div>
 
     <div class="card">
@@ -114,6 +109,7 @@ input[type=password],input[type=text],input[type=number],select{width:100%;paddi
     </div>
 
     <div class="card">
+      <h2>تفاصيل التجار</h2>
       <div id="list"></div>
       <div id="msg"></div>
     </div>
@@ -164,15 +160,105 @@ function renderStats() {
   $('s-susp').textContent = stores.filter(s => s.status === 'suspended').length;
 }
 
-// قائمة مختصرة: رقم التاجر ورقم البوت مع أزرار الإيقاف والتشغيل والفصل
-.nlist{display:flex;flex-direction:column;gap:8px}
-.nitem{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#f9fbff;border:1px solid #e3e9f3;border-right:4px solid #188038;border-radius:10px;padding:12px}
-.nitem.off{border-right-color:#d93025;background:#fff8f8}
-.nhead{font-weight:700;font-size:15px;margin-bottom:8px}
-.nchips{display:flex;gap:6px;flex-wrap:wrap}
-.nchip{background:#fff;border:1px solid #dde4ee;border-radius:8px;padding:4px 8px;font-size:12px;color:#555}
-.nchip b{color:#222;font-weight:700}
-.nact{display:flex;gap:4px;flex-wrap:wrap}
+function chip(label, value, ltr) {
+  const c = document.createElement('span');
+  c.className = 'nchip';
+  const l = document.createElement('span');
+  l.textContent = label + ': ';
+  const v = document.createElement('b');
+  v.textContent = value;
+  if (ltr) v.className = 'ltr';
+  c.append(l, v);
+  return c;
+}
+
+function renderNumbers() {
+  const box = $('numbers-list');
+  box.innerHTML = '';
+  if (stores.length === 0) {
+    box.innerHTML = '<div class="sub">لا يوجد تجار بعد</div>';
+    return;
+  }
+
+  stores.forEach(s => {
+    const item = document.createElement('div');
+    item.className = 'nitem' + (s.status === 'active' ? '' : ' off');
+
+    const left = document.createElement('div');
+
+    const head = document.createElement('div');
+    head.className = 'nhead';
+    head.textContent = s.name + ' (كود ' + s.merchant_code + ')  ';
+    const badge = document.createElement('span');
+    badge.className = 'badge b-' + s.status;
+    badge.textContent = STATUS_LABEL[s.status] || s.status;
+    head.appendChild(badge);
+
+    const chips = document.createElement('div');
+    chips.className = 'nchips';
+    chips.append(chip('التاجر', s.phone || '—', true));
+    if (hasPrivateNumber(s)) {
+      chips.append(chip('البوت', s.wa_display_phone || s.wa_phone_number_id, true));
+    } else {
+      chips.append(chip('البوت', 'مشترك', false));
+    }
+
+    left.append(head, chips);
+
+    const actions = document.createElement('div');
+    actions.className = 'nact';
+
+    const addBtn = (label, cls, fn) => {
+      const b = document.createElement('button');
+      b.className = 'btn ' + (cls || '');
+      b.textContent = label;
+      b.addEventListener('click', () => fn(b));
+      actions.appendChild(b);
+    };
+
+    if (s.status === 'active') {
+      addBtn('إيقاف البوت', 'gray', b => act(s.id, 'pause', {}, b));
+    } else {
+      addBtn('تشغيل البوت', 'green', b => act(s.id, 'activate', {}, b));
+    }
+    if (hasPrivateNumber(s)) {
+      addBtn('فصل الرقم', 'red', b => disconnectNumber(s, b));
+    }
+
+    item.append(left, actions);
+    box.appendChild(item);
+  });
+}
+
+function renderList() {
+  const box = $('list');
+  box.innerHTML = '';
+  if (stores.length === 0) {
+    box.innerHTML = '<div class="sub">لا يوجد تجار بعد</div>';
+    return;
+  }
+
+  stores.forEach(s => {
+    const row = document.createElement('div');
+    row.className = 'store';
+
+    const top = document.createElement('div');
+    top.className = 'row';
+
+    const info = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = s.name + '  (كود ' + s.merchant_code + ')';
+    const badge = document.createElement('span');
+    badge.className = 'badge b-' + s.status;
+    badge.textContent = STATUS_LABEL[s.status] || s.status;
+    name.append(' ', badge);
+    info.appendChild(name);
+
+    const quota = Number(s.notify_quota || 0);
+    const unit = Number(s.notify_unit_price || 0);
+    const used = Number(s.notify_used || 0);
+
     const meta = document.createElement('div');
     meta.className = 'meta';
     meta.textContent =
@@ -249,7 +335,6 @@ function renderStats() {
       b.textContent = label;
       b.addEventListener('click', () => fn(b));
       actions.appendChild(b);
-      return b;
     };
 
     addBtn('تفعيل', 'green', b => act(s.id, 'activate', {}, b));
@@ -277,7 +362,6 @@ function renderStats() {
   });
 }
 
-// صندوق نوع الاستقبال: بوت مشترك أو رقم خاص
 function buildModeBox(s) {
   const box = document.createElement('div');
   box.className = 'mode-box';
