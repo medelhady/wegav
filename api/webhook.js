@@ -1500,6 +1500,10 @@ async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
     if (row) return sendReply(pcfg, pid, from, row);
   }
 
+  if (type !== 'text' || !text) {
+    console.log('NON_TEXT_TRIGGER', type, from, msg.id);
+    return;
+  }
   return sendKeywordMenu(pcfg, pid, from, store.id);
 }
 
