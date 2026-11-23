@@ -1546,9 +1546,9 @@ async function handleCentralAdmin(cfg, pid, from, msg, session) {
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
   const cmd = normalize(text);
 
-  if (session.state !== 'central_welcome') {
+  if (session.state !== 'await_welcome') {
     if (cmd === WELCOME_CMD) {
-      await setSession(cfg, from, { state: 'central_welcome' });
+      await setSession(cfg, from, { state: 'await_welcome' });
       await sendText(cfg, pid, from,
         '✏️ *ترحيب البوت المركزي*\n\n' +
         'أرسل الآن نصاً أو صوتاً أو صورة أو فيديو.\n' +
