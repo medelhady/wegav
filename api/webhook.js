@@ -1612,11 +1612,12 @@ async function handleMessage(cfg, phoneNumberId, msg) {
       if (handled) return;
     }
 
-    if (session.state === 'await_store_name') {
+     if (session.state === 'await_store_name') {
       return handleRegistration(bcfg, phoneNumberId, from, msg);
     }
-    return handleCustomer(bcfg, phoneNumberId, from, msg, session);
-  }
+    // الرقم المركزي لا يستخدم المتجر المرتبط بالجلسة من الرقم الخاص
+    const csession = { ...session, active_store_id: null, access_code_id: null };
+    return handleCustomer(bcfg, phoneNumberId, from, msg, csession);
 
   const store = await getStoreByPhone(cfg, from);
   if (store) {
