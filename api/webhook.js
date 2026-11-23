@@ -1530,12 +1530,12 @@ async function saveCentralMedia(cfg, msg, type) {
   return path;
 }
 
-// حفظ أو تحديث رسالة مركزية في جدول bot_messages
+// تحديث رسالة مركزية موجودة في جدول bot_messages (يحافظ على label وdefault_value)
 async function saveBotRow(cfg, key, row) {
-  const r = await fetch(`${cfg.url}/rest/v1/bot_messages?on_conflict=key`, {
-    method: 'POST',
-    headers: { ...sbHeaders(cfg.key), Prefer: 'resolution=merge-duplicates,return=minimal' },
-    body: JSON.stringify({ key, ...row }),
+  const r = await fetch(`${cfg.url}/rest/v1/bot_messages?key=eq.${encodeURIComponent(key)}`, {
+    method: 'PATCH',
+    headers: { ...sbHeaders(cfg.key), Prefer: 'return=minimal' },
+    body: JSON.stringify({ ...row, updated_at: new Date().toISOString() }),
   });
   if (!r.ok) throw new Error('bot message save failed: ' + r.status);
 }
@@ -1574,7 +1574,7 @@ async function handleCentralAdmin(cfg, pid, from, msg, session) {
   if (MEDIA_TYPES.includes(type)) {
     try {
       const path = await saveCentralMedia(cfg, msg, type);
-      await saveBotRow(cfg, 'customerWelcome', { kind: type, media_path: path });
+      await saveBotRow(cfg, 'customerWelcome', { kind: type, media_path: path, value: '' });
       await sendText(cfg, pid, from, '✅ تم حفظ الملف. أرسل ملفاً آخر لتغييره، أو اكتب *تم*.');
     } catch (err) {
       console.error('central media error:', err?.message || err);
