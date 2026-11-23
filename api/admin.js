@@ -11,12 +11,30 @@ async function sbDelete(url, key, path) {
   });
 }
 
+// حذف كل بيانات المتجر من كل الجداول المرتبطة، ثم المتجر نفسه
 async function deleteStoreData(url, key, storeId) {
+  // أولاً: الجلسات تفقد ارتباطها بالمتجر (حتى لا تبقى معلّقة)
+  await fetch(`${url}/rest/v1/wa_sessions?active_store_id=eq.${storeId}`, {
+    method: 'PATCH',
+    headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
+    body: JSON.stringify({ active_store_id: null, access_code_id: null, state: 'idle' }),
+  }).catch(() => null);
+
+  // ثانياً: الجداول المرتبطة بالمتجر
+  const tables = ['access_redemptions', 'access_codes', 'auto_replies', 'store_customers'];
+  for (const t of tables) {
+    await fetch(`${url}/rest/v1/${t}?store_id=eq.${storeId}`, {
+      method: 'DELETE',
+      headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
+    }).catch(() => null);
+  }
+
+  // ثالثاً: الملفات من التخزين ثم من الجدول
   const mr = await fetch(
     `${url}/rest/v1/media_files?store_id=eq.${storeId}&select=storage_path`,
     { headers: sbHeaders(key) }
   );
-  const files = await mr.json();
+  const files = await mr.json().catch(() => []);
   if (Array.isArray(files) && files.length > 0) {
     const paths = files.map(f => f.storage_path).filter(Boolean);
     if (paths.length > 0) {
@@ -24,10 +42,15 @@ async function deleteStoreData(url, key, storeId) {
         method: 'DELETE',
         headers: sbHeaders(key),
         body: JSON.stringify({ prefixes: paths }),
-      });
+      }).catch(() => null);
     }
   }
+  await fetch(`${url}/rest/v1/media_files?store_id=eq.${storeId}`, {
+    method: 'DELETE',
+    headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
+  }).catch(() => null);
 
+  // أخيراً: المتجر نفسه
   const r = await sbDelete(url, key, `/rest/v1/stores?id=eq.${storeId}`);
   if (!r.ok) {
     const text = await r.text();
