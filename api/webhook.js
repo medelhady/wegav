@@ -14,6 +14,9 @@ const MEDIA_TYPES = ['audio', 'image', 'video'];
 const IGNORED_TYPES = ['unsupported', 'reaction', 'sticker', 'system', 'unknown', 'order', 'contacts', 'location', 'interactive', 'button'];
 const KIND_AR = { audio: 'صوت', image: 'صورة', video: 'فيديو' };
 const BOT_NUMBER = (process.env.BOT_WA_NUMBER || '22224404036').replace(/\D/g, '');
+const BOT_PHONE_NUMBER_ID = (process.env.BOT_PHONE_NUMBER_ID || '').trim();
+const BOT_WA_TOKEN = (process.env.BOT_WA_TOKEN || '').trim();
+const ADMIN_WA_NUMBER = (process.env.ADMIN_WA_NUMBER || '').replace(/\D/g, '');
 
 const EXT_BY_MIME = {
   'audio/ogg': 'ogg', 'audio/mpeg': 'mp3', 'audio/mp4': 'm4a', 'audio/amr': 'amr', 'audio/aac': 'aac',
@@ -1175,6 +1178,7 @@ async function handleMerchant(cfg, phoneNumberId, from, store, msg, session) {
       }
       return;
     }
+
     if (type === 'text' && text) {
       if (text.length > TEXT_MAX) {
         return sendText(cfg, phoneNumberId, from, MSG.textTooLong);
@@ -1499,11 +1503,98 @@ async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
     if (row) return sendReply(pcfg, pid, from, row);
   }
 
-  if (type !== 'text' || !text) {
-    console.log('NON_TEXT_TRIGGER', type, from, msg.id);
-    return;
-  }
   return sendKeywordMenu(pcfg, pid, from, store.id);
+}
+
+// حفظ ملف الترحيب المركزي في التخزين، ويعيد مساره
+async function saveCentralMedia(cfg, msg, type) {
+  const obj = msg[type] || {};
+  if (!obj.id) throw new Error('الرسالة لا تحمل ملفاً');
+  const metaRes = await fetch(`${GRAPH}/${obj.id}`, { headers: { Authorization: `Bearer ${cfg.token}` } });
+  const meta = await metaRes.json();
+  if (!meta.url) throw new Error('تعذر الوصول للملف من واتساب');
+  if (meta.file_size && meta.file_size > MAX_BYTES) throw new Error('الملف كبير جداً');
+  const fileRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${cfg.token}` } });
+  if (!fileRes.ok) throw new Error('تعذر تحميل الملف');
+  const buf = Buffer.from(await fileRes.arrayBuffer());
+  if (buf.length > MAX_BYTES) throw new Error('الملف كبير جداً');
+  const mime = String(obj.mime_type || meta.mime_type || 'application/octet-stream').split(';')[0];
+  const ext = EXT_BY_MIME[mime] || 'bin';
+  const path = `central/${type}/${Date.now()}-${Math.random().toString(36).slice(2, 10)}.${ext}`;
+  const up = await fetch(`${cfg.url}/storage/v1/object/${BUCKET}/${encodeURI(path)}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${cfg.key}`, apikey: cfg.key, 'Content-Type': mime, 'x-upsert': 'false' },
+    body: buf,
+  });
+  if (!up.ok) throw new Error('فشل حفظ الملف في التخزين');
+  return path;
+}
+
+// حفظ أو تحديث رسالة مركزية في جدول bot_messages
+async function saveBotRow(cfg, key, row) {
+  const r = await fetch(`${cfg.url}/rest/v1/bot_messages?on_conflict=key`, {
+    method: 'POST',
+    headers: { ...sbHeaders(cfg.key), Prefer: 'resolution=merge-duplicates,return=minimal' },
+    body: JSON.stringify({ key, ...row }),
+  });
+  if (!r.ok) throw new Error('bot message save failed: ' + r.status);
+}
+
+// أوامر الأدمن على الرقم المركزي. يعيد true إذا عالج الرسالة
+async function handleCentralAdmin(cfg, pid, from, msg, session) {
+  const type = msg.type;
+  const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
+  const cmd = normalize(text);
+
+  if (session.state !== 'central_welcome') {
+    if (cmd === WELCOME_CMD) {
+      await setSession(cfg, from, { state: 'central_welcome' });
+      await sendText(cfg, pid, from,
+        '✏️ *ترحيب البوت المركزي*\n\n' +
+        'أرسل الآن نصاً أو صوتاً أو صورة أو فيديو.\n' +
+        'الملف الأخير يُعتمد. عند الانتهاء اكتب *تم*.\n' +
+        'للخروج اكتب *إلغاء*.');
+      return true;
+    }
+    return false;
+  }
+
+  if (cmd === CANCEL_CMD) {
+    await resetSession(cfg, from);
+    await sendText(cfg, pid, from, '❌ *تم الإلغاء*');
+    return true;
+  }
+
+  if (cmd === DONE_CMD) {
+    await resetSession(cfg, from);
+    await sendText(cfg, pid, from, '✅ *تم حفظ ترحيب البوت المركزي*');
+    return true;
+  }
+
+  if (MEDIA_TYPES.includes(type)) {
+    try {
+      const path = await saveCentralMedia(cfg, msg, type);
+      await saveBotRow(cfg, 'customerWelcome', { kind: type, media_path: path });
+      await sendText(cfg, pid, from, '✅ تم حفظ الملف. أرسل ملفاً آخر لتغييره، أو اكتب *تم*.');
+    } catch (err) {
+      console.error('central media error:', err?.message || err);
+      await sendText(cfg, pid, from, '⚠️ تعذر حفظ الملف: ' + (err?.message || 'خطأ غير معروف'));
+    }
+    return true;
+  }
+
+  if (type === 'text' && text) {
+    try {
+      await saveBotRow(cfg, 'customerWelcome', { value: text, kind: 'text', media_path: null });
+      await sendText(cfg, pid, from, '✅ تم حفظ النص. أرسل ملفاً إن أردت، أو اكتب *تم*.');
+    } catch (err) {
+      console.error('central text error:', err?.message || err);
+      await sendText(cfg, pid, from, '⚠️ تعذر حفظ النص');
+    }
+    return true;
+  }
+
+  return true;
 }
 
 async function handleMessage(cfg, phoneNumberId, msg) {
@@ -1511,6 +1602,21 @@ async function handleMessage(cfg, phoneNumberId, msg) {
 
   const from = String(msg.from || '');
   const session = await getSession(cfg, from);
+
+  // الرقم المركزي: يستخدم توكن البوت المركزي
+  if (BOT_PHONE_NUMBER_ID && phoneNumberId === BOT_PHONE_NUMBER_ID) {
+    const bcfg = { ...cfg, token: BOT_WA_TOKEN || cfg.token };
+
+    if (ADMIN_WA_NUMBER && from === ADMIN_WA_NUMBER) {
+      const handled = await handleCentralAdmin(bcfg, phoneNumberId, from, msg, session);
+      if (handled) return;
+    }
+
+    if (session.state === 'await_store_name') {
+      return handleRegistration(bcfg, phoneNumberId, from, msg);
+    }
+    return handleCustomer(bcfg, phoneNumberId, from, msg, session);
+  }
 
   const store = await getStoreByPhone(cfg, from);
   if (store) {
