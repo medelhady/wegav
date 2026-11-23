@@ -1339,19 +1339,20 @@ async function handleRegistration(cfg, phoneNumberId, from, msg) {
   const phone = normalizePhone(from);
   const existing = await getStoreByPhone(cfg, phone);
   if (existing) {
-    await resetSession(cfg, from);
+    await resetSession(cfg, from, 'customer');
     return sendText(cfg, phoneNumberId, from, MSG.registerAlready);
   }
 
   try {
     const store = await createStore(cfg, phone, text);
-    await resetSession(cfg, from);
+    await resetSession(cfg, from, 'customer');
     return sendText(cfg, phoneNumberId, from, MSG.registerSuccess(store));
   } catch (err) {
     console.error('register failed:', err?.message || err);
-    await resetSession(cfg, from);
+    await resetSession(cfg, from, 'customer');
     return sendText(cfg, phoneNumberId, from, MSG.registerAlready);
   }
+}
 }
 
 // زبائن الرقم المشترك (يكتبون كود المتجر)
