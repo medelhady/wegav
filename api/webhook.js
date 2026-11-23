@@ -1438,8 +1438,15 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
 
     if (isNew) return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
     return sendKeywordMenu(cfg, phoneNumberId, from, store.id);
-    
- 
+  }
+
+  // ترحيب واحد فقط لكل زبون جديد بلا متجر، ثم يصمت البوت عن الرسائل غير المفهومة
+  if (!session.state || session.state === 'idle') {
+    await setSession(cfg, from, { state: 'customer' });
+    return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
+  }
+  return;
+}
 
 // زبائن الرقم الخاص (رقم مستقل لكل متجر)
 async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
@@ -1504,13 +1511,6 @@ async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
   return sendKeywordMenu(pcfg, pid, from, store.id);
 }
 
-      // ترحيب واحد فقط لكل زبون جديد بلا متجر، ثم يصمت البوت عن الرسائل غير المفهومة
-  if (!session.state || session.state === 'idle') {
-    await setSession(cfg, from, { state: 'customer' });
-    return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
-  }
-  return;
-    }
 // حفظ ملف الترحيب المركزي في التخزين، ويعيد مساره
 async function saveCentralMedia(cfg, msg, type) {
   const obj = msg[type] || {};
