@@ -1603,7 +1603,7 @@ async function handleMessage(cfg, phoneNumberId, msg) {
   const from = String(msg.from || '');
   const session = await getSession(cfg, from);
 
-  // الرقم المركزي: يستخدم توكن البوت المركزي
+  // الرقم المركزي: يستخدم توكن البوت المركزي ولا يتأثر بجلسة الرقم الخاص
   if (BOT_PHONE_NUMBER_ID && phoneNumberId === BOT_PHONE_NUMBER_ID) {
     const bcfg = { ...cfg, token: BOT_WA_TOKEN || cfg.token };
 
@@ -1612,12 +1612,13 @@ async function handleMessage(cfg, phoneNumberId, msg) {
       if (handled) return;
     }
 
-     if (session.state === 'await_store_name') {
+    if (session.state === 'await_store_name') {
       return handleRegistration(bcfg, phoneNumberId, from, msg);
     }
-    // الرقم المركزي لا يستخدم المتجر المرتبط بالجلسة من الرقم الخاص
+
     const csession = { ...session, active_store_id: null, access_code_id: null };
     return handleCustomer(bcfg, phoneNumberId, from, msg, csession);
+  }
 
   const store = await getStoreByPhone(cfg, from);
   if (store) {
