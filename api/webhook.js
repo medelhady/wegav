@@ -1510,6 +1510,7 @@ async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
     return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
   }
   return;
+    }
 // حفظ ملف الترحيب المركزي في التخزين، ويعيد مساره
 async function saveCentralMedia(cfg, msg, type) {
   const obj = msg[type] || {};
