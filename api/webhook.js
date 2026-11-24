@@ -296,7 +296,6 @@ function sbHeaders(key) {
   return { Authorization: `Bearer ${key}`, apikey: key, 'Content-Type': 'application/json' };
 }
 
-// يسجل معرّف الرسالة في قاعدة البيانات، ويرجع false إذا كانت معالجة من قبل
 async function claimMessage(cfg, id) {
   if (!id) return true;
   const r = await fetch(`${cfg.url}/rest/v1/processed_messages`, {
@@ -459,7 +458,6 @@ async function upsertCustomer(cfg, storeId, phone, subscribed) {
   if (!r.ok) console.error('customer upsert failed', r.status);
 }
 
-// يعيد true إذا كان الزبون جديداً في هذا المتجر (لم يكن مسجلاً من قبل)
 async function isNewCustomer(cfg, storeId, phone) {
   const r = await fetch(
     `${cfg.url}/rest/v1/store_customers?store_id=eq.${storeId}&phone=eq.${phone}&select=id&limit=1`,
@@ -1352,10 +1350,8 @@ async function handleRegistration(cfg, phoneNumberId, from, msg) {
     await resetSession(cfg, from, 'customer');
     return sendText(cfg, phoneNumberId, from, MSG.registerAlready);
   }
-
 }
 
-// زبائن الرقم المشترك (يكتبون كود المتجر)
 async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
   if (IGNORED_TYPES.includes(msg.type)) return;
 
@@ -1441,7 +1437,6 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
     return sendKeywordMenu(cfg, phoneNumberId, from, store.id);
   }
 
-  // ترحيب واحد فقط لكل زبون جديد بلا متجر، ثم يصمت البوت عن الرسائل غير المفهومة
   if (!session.state || session.state === 'idle') {
     await setSession(cfg, from, { state: 'customer' });
     return sendText(cfg, phoneNumberId, from, MSG.customerWelcome);
@@ -1449,7 +1444,6 @@ async function handleCustomer(cfg, phoneNumberId, from, msg, session) {
   return;
 }
 
-// زبائن الرقم الخاص (رقم مستقل لكل متجر)
 async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
   if (IGNORED_TYPES.includes(msg.type)) return;
 
@@ -1467,7 +1461,6 @@ async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
     return sendText(pcfg, pid, from, on ? MSG.customerSubscribed : MSG.customerUnsubscribed);
   }
 
-  // الترحيب يُرسل مرة واحدة فقط لكل زبون جديد
   const newcomer = await isNewCustomer(pcfg, store.id, from);
   if (newcomer) {
     await setSession(pcfg, from, { state: 'customer', active_store_id: store.id, access_code_id: null });
@@ -1512,7 +1505,6 @@ async function handlePrivateCustomer(pcfg, pid, from, store, msg, session) {
   return sendKeywordMenu(pcfg, pid, from, store.id);
 }
 
-// حفظ ملف الترحيب المركزي في التخزين، ويعيد مساره
 async function saveCentralMedia(cfg, msg, type) {
   const obj = msg[type] || {};
   if (!obj.id) throw new Error('الرسالة لا تحمل ملفاً');
@@ -1536,7 +1528,6 @@ async function saveCentralMedia(cfg, msg, type) {
   return path;
 }
 
-// تحديث رسالة مركزية موجودة في جدول bot_messages (يحافظ على label وdefault_value)
 async function saveBotRow(cfg, key, row) {
   const r = await fetch(`${cfg.url}/rest/v1/bot_messages?key=eq.${encodeURIComponent(key)}`, {
     method: 'PATCH',
@@ -1546,7 +1537,6 @@ async function saveBotRow(cfg, key, row) {
   if (!r.ok) throw new Error('bot message save failed: ' + r.status);
 }
 
-// أوامر الأدمن على الرقم المركزي. يعيد true إذا عالج الرسالة
 async function handleCentralAdmin(cfg, pid, from, msg, session) {
   const type = msg.type;
   const text = type === 'text' ? String(msg.text?.body || '').trim() : '';
@@ -1609,7 +1599,6 @@ async function handleMessage(cfg, phoneNumberId, msg) {
   const from = String(msg.from || '');
   const session = await getSession(cfg, from);
 
-  // الرقم المركزي: يستخدم توكن البوت المركزي ولا يتأثر بجلسة الرقم الخاص
   if (BOT_PHONE_NUMBER_ID && phoneNumberId === BOT_PHONE_NUMBER_ID) {
     const bcfg = { ...cfg, token: BOT_WA_TOKEN || cfg.token };
 
