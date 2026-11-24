@@ -1611,8 +1611,7 @@ async function handleMessage(cfg, phoneNumberId, msg) {
       return handleRegistration(bcfg, phoneNumberId, from, msg);
     }
 
-    const csession = { ...session, active_store_id: null, access_code_id: null };
-    return handleCustomer(bcfg, phoneNumberId, from, msg, csession);
+    return handleCustomer(bcfg, phoneNumberId, from, msg, session);
   }
 
   const store = await getStoreByPhone(cfg, from);
