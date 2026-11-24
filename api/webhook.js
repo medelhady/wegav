@@ -1352,7 +1352,7 @@ async function handleRegistration(cfg, phoneNumberId, from, msg) {
     await resetSession(cfg, from, 'customer');
     return sendText(cfg, phoneNumberId, from, MSG.registerAlready);
   }
-}
+
 }
 
 // زبائن الرقم المشترك (يكتبون كود المتجر)
