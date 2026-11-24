@@ -13,14 +13,12 @@ async function sbDelete(url, key, path) {
 
 // حذف كل بيانات المتجر من كل الجداول المرتبطة، ثم المتجر نفسه
 async function deleteStoreData(url, key, storeId) {
-  // أولاً: الجلسات تفقد ارتباطها بالمتجر (حتى لا تبقى معلّقة)
   await fetch(`${url}/rest/v1/wa_sessions?active_store_id=eq.${storeId}`, {
     method: 'PATCH',
     headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
     body: JSON.stringify({ active_store_id: null, access_code_id: null, state: 'idle' }),
   }).catch(() => null);
 
-  // ثانياً: الجداول المرتبطة بالمتجر
   const tables = ['access_redemptions', 'access_codes', 'auto_replies', 'store_customers'];
   for (const t of tables) {
     await fetch(`${url}/rest/v1/${t}?store_id=eq.${storeId}`, {
@@ -29,7 +27,6 @@ async function deleteStoreData(url, key, storeId) {
     }).catch(() => null);
   }
 
-  // ثالثاً: الملفات من التخزين ثم من الجدول
   const mr = await fetch(
     `${url}/rest/v1/media_files?store_id=eq.${storeId}&select=storage_path`,
     { headers: sbHeaders(key) }
@@ -50,7 +47,6 @@ async function deleteStoreData(url, key, storeId) {
     headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
   }).catch(() => null);
 
-  // أخيراً: المتجر نفسه
   const r = await sbDelete(url, key, `/rest/v1/stores?id=eq.${storeId}`);
   if (!r.ok) {
     const text = await r.text();
@@ -62,6 +58,36 @@ function toInt(v, max) {
   const n = Math.floor(Number(v));
   if (!Number.isFinite(n) || n < 0 || n > max) return null;
   return n;
+}
+
+function normalizeWaPhone(p) {
+  const d = String(p || '').replace(/\D/g, '');
+  if (d.length === 8) return '222' + d;
+  return d;
+}
+
+// يبحث عن معرّف الرقم ومعرّف الحساب تلقائياً من حسابات واتساب التي يملكها التوكن
+async function resolveFromPhone(phone, token) {
+  const digits = normalizeWaPhone(phone);
+  const url =
+    `${GRAPH}/me/businesses?fields=owned_whatsapp_business_accounts{id,phone_numbers{id,display_phone_number}}&limit=200`;
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    return { ok: false, error: d?.error?.message || 'تعذر قراءة الحسابات بهذا التوكن' };
+  }
+
+  for (const b of d.data || []) {
+    for (const w of b.owned_whatsapp_business_accounts?.data || []) {
+      for (const p of w.phone_numbers?.data || []) {
+        const pd = String(p.display_phone_number || '').replace(/\D/g, '');
+        if (pd === digits) {
+          return { ok: true, phone_number_id: p.id, waba_id: w.id, display: p.display_phone_number || '' };
+        }
+      }
+    }
+  }
+  return { ok: false, error: 'الرقم غير موجود ضمن حسابات واتساب التي يملكها هذا التوكن' };
 }
 
 // فحص الرقم والتوكن قبل الحفظ: يعيد اسم الرقم أو سبب الفشل
@@ -124,7 +150,6 @@ export default async function handler(req, res) {
         return res.status(200).json({ items: data });
       }
 
-      // لا نعيد التوكن أبداً، فقط هل هو موجود وبيانات الرقم المربوط
       const r = await fetch(
         `${url}/rest/v1/stores?select=id,name,phone,merchant_code,status,plan,replies_quota,replies_used,plan_expires_at,private_enabled,public_codes_enabled,notify_quota,notify_unit_price,notify_used,wa_phone_number_id,wa_display_phone,wa_verified_name,created_at&order=created_at.desc`,
         { headers: sbHeaders(key) }
@@ -167,21 +192,24 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
 
-      // ربط رقم التاجر: نتحقق من الرقم والتوكن، ونشترك الحساب في التطبيق، ثم نحفظ
+      // ربط رقم التاجر: يكفي رقم الواتساب والتوكن، والنظام يجد المعرّفات تلقائياً
       if (action === 'wa_connect') {
-        const phoneNumberId = String(body.phone_number_id || '').trim();
-        const wabaId = String(body.waba_id || '').trim();
         const token = String(body.token || '').trim();
+        const phoneInput = String(body.phone || '').trim();
 
-        if (!/^\d{5,25}$/.test(phoneNumberId)) {
-          return res.status(400).json({ error: 'معرّف الرقم (Phone Number ID) غير صالح' });
-        }
-        if (!/^\d{5,25}$/.test(wabaId)) {
-          return res.status(400).json({ error: 'معرّف حساب واتساب للأعمال (WABA ID) غير صالح' });
+        if (phoneInput.replace(/\D/g, '').length < 8) {
+          return res.status(400).json({ error: 'أدخل رقم الواتساب الذي سيكون البوت' });
         }
         if (token.length < 20) {
           return res.status(400).json({ error: 'التوكن قصير جداً' });
         }
+
+        const found = await resolveFromPhone(phoneInput, token);
+        if (!found.ok) {
+          return res.status(400).json({ error: found.error });
+        }
+        const phoneNumberId = found.phone_number_id;
+        const wabaId = found.waba_id;
 
         const check = await verifyWhatsAppNumber(phoneNumberId, token);
         if (!check.ok) {
@@ -206,7 +234,7 @@ export default async function handler(req, res) {
         if (!r.ok) {
           const text = await r.text();
           if (text.includes('duplicate') || text.includes('23505')) {
-            return res.status(400).json({ error: 'هذا المعرّف مربوط بمتجر آخر' });
+            return res.status(400).json({ error: 'هذا الرقم مربوط بمتجر آخر' });
           }
           return res.status(500).json({ error: 'فشل الحفظ' });
         }
