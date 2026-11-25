@@ -11,7 +11,6 @@ async function sbDelete(url, key, path) {
   });
 }
 
-// حذف كل بيانات المتجر من كل الجداول المرتبطة، ثم المتجر نفسه
 async function deleteStoreData(url, key, storeId) {
   await fetch(`${url}/rest/v1/wa_sessions?active_store_id=eq.${storeId}`, {
     method: 'PATCH',
@@ -60,7 +59,6 @@ function toInt(v, max) {
   return n;
 }
 
-// يتحقق أن الرقم يرد بهذا التوكن، ويعيد اسم الرقم
 async function verifyWhatsAppNumber(phoneNumberId, token) {
   const r = await fetch(
     `${GRAPH}/${phoneNumberId}?fields=display_phone_number,verified_name`,
@@ -68,8 +66,7 @@ async function verifyWhatsAppNumber(phoneNumberId, token) {
   );
   const d = await r.json().catch(() => ({}));
   if (!r.ok || !d.id) {
-    const msg = d?.error?.message || 'تعذر الوصول إلى الرقم بهذا التوكن';
-    return { ok: false, error: msg };
+    return { ok: false, error: d?.error?.message || 'تعذر الوصول إلى الرقم بهذا التوكن' };
   }
   return {
     ok: true,
@@ -78,7 +75,6 @@ async function verifyWhatsAppNumber(phoneNumberId, token) {
   };
 }
 
-// اشتراك حساب واتساب التاجر في التطبيق حتى تصل الرسائل إلى الـ webhook
 async function subscribeWaba(wabaId, token) {
   const r = await fetch(`${GRAPH}/${wabaId}/subscribed_apps`, {
     method: 'POST',
@@ -86,8 +82,7 @@ async function subscribeWaba(wabaId, token) {
   });
   const d = await r.json().catch(() => ({}));
   if (!r.ok || !d.success) {
-    const msg = d?.error?.message || 'خطأ غير معروف';
-    return { ok: false, error: msg };
+    return { ok: false, error: d?.error?.message || 'خطأ غير معروف' };
   }
   return { ok: true };
 }
@@ -162,7 +157,7 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
 
-      // ربط رقم التاجر بالمعرّفات اليدوية: معرّف الرقم، معرّف الحساب، والتوكن
+      // ربط الرقم: نحفظ التوكن أولاً، ثم نتحقق ونشترك ونعيد النتيجة الفعلية
       if (action === 'wa_connect') {
         const phoneNumberId = String(body.phone_number_id || '').trim();
         const wabaId = String(body.waba_id || '').trim();
@@ -178,37 +173,44 @@ export default async function handler(req, res) {
           return res.status(400).json({ error: 'التوكن قصير جداً' });
         }
 
-        const check = await verifyWhatsAppNumber(phoneNumberId, token);
-        if (!check.ok) {
-          return res.status(400).json({ error: 'فشل التحقق: ' + check.error });
-        }
-
-        const sub = await subscribeWaba(wabaId, token);
-        if (!sub.ok) {
-          return res.status(400).json({ error: 'فشل الاشتراك في الحساب: ' + sub.error });
-        }
-
-        const r = await fetch(`${url}/rest/v1/stores?id=eq.${id}`, {
+        const saveRes = await fetch(`${url}/rest/v1/stores?id=eq.${id}`, {
           method: 'PATCH',
           headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
           body: JSON.stringify({
             wa_phone_number_id: phoneNumberId,
             wa_token: token,
-            wa_display_phone: check.display,
-            wa_verified_name: check.verified_name,
           }),
         });
-        if (!r.ok) {
-          const text = await r.text();
+        if (!saveRes.ok) {
+          const text = await saveRes.text();
           if (text.includes('duplicate') || text.includes('23505')) {
-            return res.status(400).json({ error: 'هذا المعرّف مربوط بمتجر آخر' });
+            return res.status(400).json({ error: 'هذا الرقم مربوط بمتجر آخر' });
           }
-          return res.status(500).json({ error: 'فشل الحفظ' });
+          return res.status(500).json({ error: 'فشل الحفظ في قاعدة البيانات: ' + text.slice(0, 200) });
         }
+
+        const check = await verifyWhatsAppNumber(phoneNumberId, token);
+        if (check.ok) {
+          await fetch(`${url}/rest/v1/stores?id=eq.${id}`, {
+            method: 'PATCH',
+            headers: { ...sbHeaders(key), Prefer: 'return=minimal' },
+            body: JSON.stringify({
+              wa_display_phone: check.display,
+              wa_verified_name: check.verified_name,
+            }),
+          }).catch(() => null);
+        }
+
+        const sub = await subscribeWaba(wabaId, token);
+
         return res.status(200).json({
           ok: true,
-          display: check.display,
-          verified_name: check.verified_name,
+          saved: true,
+          verified: check.ok,
+          verify_error: check.ok ? null : check.error,
+          subscribed: sub.ok,
+          subscribe_error: sub.ok ? null : sub.error,
+          display: check.ok ? check.display : '',
         });
       }
 
