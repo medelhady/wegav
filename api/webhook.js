@@ -1616,7 +1616,12 @@ async function handleMessage(cfg, phoneNumberId, msg) {
 
   const store = await getStoreByPhone(cfg, from);
   if (store) {
-    return handleMerchant(cfg, phoneNumberId, from, store, msg, session);
+    // إن كانت الرسالة على الرقم الخاص للمتجر، نرد بتوكن الرقم الخاص نفسه
+    const mcfg = (store.wa_phone_number_id && store.wa_phone_number_id === phoneNumberId && store.wa_token)
+      ? { ...cfg, token: store.wa_token }
+      : cfg;
+    return handleMerchant(mcfg, phoneNumberId, from, store, msg, session);
+  }
   }
 
   const privateStore = await getStoreByWaNumber(cfg, phoneNumberId);
