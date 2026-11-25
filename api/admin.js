@@ -79,7 +79,7 @@ async function subscribeWaba(wabaId, token) {
   const r = await fetch(`${GRAPH}/${wabaId}/subscribed_apps`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ override_callback_uri: undefined }),
+    body: JSON.stringify({}),
   });
   const d = await r.json().catch(() => ({}));
   if (!r.ok || !d.success) {
@@ -158,7 +158,6 @@ export default async function handler(req, res) {
         return res.status(200).json({ ok: true });
       }
 
-      // ربط الرقم: نحفظ التوكن أولاً، ثم نتحقق ونشترك ونعيد النتيجة الفعلية
       if (action === 'wa_connect') {
         const phoneNumberId = String(body.phone_number_id || '').trim();
         const wabaId = String(body.waba_id || '').trim();
