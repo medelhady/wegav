@@ -78,7 +78,8 @@ async function verifyWhatsAppNumber(phoneNumberId, token) {
 async function subscribeWaba(wabaId, token) {
   const r = await fetch(`${GRAPH}/${wabaId}/subscribed_apps`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ override_callback_uri: undefined }),
   });
   const d = await r.json().catch(() => ({}));
   if (!r.ok || !d.success) {
