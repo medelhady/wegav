@@ -1622,7 +1622,7 @@ async function handleMessage(cfg, phoneNumberId, msg) {
       : cfg;
     return handleMerchant(mcfg, phoneNumberId, from, store, msg, session);
   }
-  }
+  
 
   const privateStore = await getStoreByWaNumber(cfg, phoneNumberId);
   if (privateStore && privateStore.wa_token) {
