@@ -449,10 +449,10 @@ async function connectNumber(s, pidInput, wabaInput, tokInput, btn) {
   if (!pid) return show('✗ أدخل معرّف الرقم (Phone Number ID)', 'err');
   if (!wabaId) return show('✗ أدخل معرّف حساب واتساب للأعمال (WABA ID)', 'err');
   if (!token) return show('✗ أدخل التوكن', 'err');
-  if (!confirm('ربط رقم ' + s.name + '؟ سيُفحص الرقم ويُشترك الحساب في التطبيق.')) return;
+  if (!confirm('حفظ الربط للمتجر ' + s.name + '؟ سيُحفظ التوكن أولاً ثم يُفحص.')) return;
 
   btn.disabled = true;
-  btn.textContent = '… جاري الفحص والاشتراك';
+  btn.textContent = '… جاري الحفظ والفحص';
   try {
     const data = await api('POST', {
       id: s.id,
@@ -461,14 +461,22 @@ async function connectNumber(s, pidInput, wabaInput, tokInput, btn) {
       waba_id: wabaId,
       token,
     });
-    show('✓ تم ربط الرقم ' + (data.display || '') + ' لـ ' + s.name, 'ok');
     tokInput.value = '';
+    const lines = ['✓ تم حفظ التوكن والمعرّفات للمتجر ' + s.name];
+    lines.push(data.verified
+      ? '✓ التحقق من الرقم نجح: ' + (data.display || '')
+      : '✗ التحقق من الرقم فشل: ' + (data.verify_error || ''));
+    lines.push(data.subscribed
+      ? '✓ اشتراك الحساب في التطبيق نجح'
+      : '✗ اشتراك الحساب فشل: ' + (data.subscribe_error || ''));
+    show(lines.join('\n'), data.verified && data.subscribed ? 'ok' : 'err');
     await load();
   } catch (e) {
-    show('✗ فشل الربط: ' + e.message, 'err');
+    show('✗ فشل الحفظ: ' + e.message, 'err');
   } finally {
     btn.disabled = false;
     btn.textContent = 'ربط وفحص';
+  
   }
 }
 
